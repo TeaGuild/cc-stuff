@@ -5,12 +5,16 @@
     "name": "Metro Network",
     "timezone": "Europe/Moscow"
   },
+  "_comment_computer_configs": "Per-computer monitor configuration. Key = computer ID. Set central_monitor to null for no central display. layout_columns can be a number or 'auto' for dynamic sizing.",
   "computer_configs": {
     "11": {
       "central_monitor": "monitor_0",
       "layout_columns": 2
     },
     "9": {
+      "central_monitor": null
+    },
+    "8": {
       "central_monitor": null
     },
     "18": {
@@ -98,7 +102,7 @@
           "next_station": "phystech",
           "platform_name": "P West",
           "display_order": 4,
-          "monitor": "monitor_6"
+          "monitor": null
         },
         "8:right": {
           "line": "P",
