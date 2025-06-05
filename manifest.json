@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "scripts": [
+    {
+      "id": "train_station",
+      "name": "Train Station Monitor",
+      "description": "Monitor and display Create mod train station status",
+      "file": "payload.lua",
+      "local_name": "train_station.lua",
+      "category": "Create Mod",
+      "requirements": [
+        "Create train station peripheral",
+        "Optional: Monitor for display",
+        "Optional: Speaker for audio"
+      ]
+    },
+    {
+      "id": "hello_world",
+      "name": "Hello World Demo",
+      "description": "Simple demo script with monitor display",
+      "file": "hello_world.lua",
+      "local_name": "hello_world.lua",
+      "category": "Examples",
+      "requirements": [
+        "Optional: Monitor for display"
+      ]
+    }
+  ],
+  "default": "train_station"
+}
