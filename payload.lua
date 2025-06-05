@@ -223,6 +223,109 @@ local function clearDisplays()
     end
 end
 
+
+-- Function to enter assembly mode
+local function enterAssemblyMode()
+    if not station.setAssemblyMode then
+        return false, "This station does not support assembly mode"
+    end
+    
+    local success, err = pcall(station.setAssemblyMode, true)
+    if success then
+        playTone(600, 0.05, 0.2)  -- Quick beep
+        return true, "Entered assembly mode"
+    else
+        playTone(220, 0.3, 0.4)  -- Error beep
+        return false, err or "Failed to enter assembly mode"
+    end
+end
+
+-- Function to exit assembly mode
+local function exitAssemblyMode()
+    if not station.setAssemblyMode then
+        return false, "This station does not support assembly mode"
+    end
+    
+    local success, err = pcall(station.setAssemblyMode, false)
+    if success then
+        playTone(600, 0.05, 0.2)  -- Quick beep
+        return true, "Exited assembly mode"
+    else
+        playTone(220, 0.3, 0.4)  -- Error beep
+        return false, err or "Failed to exit assembly mode"
+    end
+end
+
+-- Function to assemble train
+local function assembleTrain()
+    if not station.assemble then
+        return false, "This station does not support train assembly"
+    end
+    
+    -- First check if in assembly mode
+    if not safeCall(station.isInAssemblyMode) then
+        return false, "Not in assembly mode! Press M first"
+    end
+    
+    -- Play assembly start sound
+    if useSpeaker then
+        -- Rising tones for assembly
+        playTone(440, 0.1, 0.3)  -- A4
+        playTone(523, 0.1, 0.3)  -- C5
+        playTone(659, 0.2, 0.3)  -- E5
+    end
+    
+    local success, err = pcall(station.assemble)
+    if success then
+        -- Play success fanfare
+        if useSpeaker then
+            sleep(0.2)
+            playTone(523, 0.1, 0.3)  -- C5
+            playTone(659, 0.1, 0.3)  -- E5
+            playTone(784, 0.1, 0.3)  -- G5
+            playTone(1047, 0.3, 0.4) -- C6
+        end
+        return true, "Train assembled successfully"
+    else
+        playTone(220, 0.3, 0.4)  -- Error beep
+        return false, err or "Failed to assemble train"
+    end
+end
+
+-- Function to disassemble train
+local function disassembleTrain()
+    if not station.disassemble then
+        return false, "This station does not support disassembly"
+    end
+    
+    -- Check if in assembly mode (should not be)
+    if safeCall(station.isInAssemblyMode) then
+        return false, "Cannot disassemble in assembly mode!"
+    end
+    
+    -- Check if train is present
+    if not safeCall(station.isTrainPresent) then
+        return false, "No train present to disassemble"
+    end
+    
+    -- Play disassemble sound
+    if useSpeaker then
+        -- Descending tones for disassembly
+        playTone(659, 0.1, 0.3)  -- E5
+        playTone(523, 0.1, 0.3)  -- C5
+        playTone(440, 0.1, 0.3)  -- A4
+        playTone(349, 0.2, 0.3)  -- F4
+    end
+    
+    local success, err = pcall(station.disassemble)
+    if success then
+        return true, "Train disassembled successfully"
+    else
+        playTone(220, 0.3, 0.4)  -- Error beep
+        return false, err or "Failed to disassemble train"
+    end
+end
+
 -- Get the actual station name (not the peripheral name)
 local actualStationName = safeCall(station.getStationName) or "Unknown Station"
 
@@ -550,6 +653,10 @@ local function displayTerminalStatus(data, serverStatus, nextUpdateCheck)
     end
     
     output("Status: " .. status, 1, 11, colors.green)
+
+    if data.assembly_mode then
+        output("ASSEMBLY MODE ACTIVE", 1, 12, colors.orange)
+    end
     
     -- Server connection
     output("Server: " .. serverStatus, 1, 13, serverStatus == "Connected" and colors.green or colors.red)
@@ -557,8 +664,9 @@ local function displayTerminalStatus(data, serverStatus, nextUpdateCheck)
     -- Instructions
     output("", 1, 15)
     output("Controls:", 1, 15, colors.yellow)
-    output("Q: Quit | M: Toggle monitor | S: Network status", 1, 16, colors.gray)
-    output("U: Update now | R: Restart | T: Toggle sound", 1, 17, colors.gray)
+    output("Q: Quit | S: Network status | T: Toggle sound", 1, 16, colors.gray)
+    output("U: Update | R: Restart | V: Toggle monitor", 1, 17, colors.gray)
+    output("M: Assembly mode | A: Assemble | D: Disassemble", 1, 18, colors.gray)
 end
 
 -- Function to get network status from server
@@ -685,12 +793,12 @@ while true do
             output("Client stopped.", 1, 1)
             break
             
-        elseif param == keys.m then
+        elseif param == keys.v then  -- Changed from keys.m
             -- Toggle monitor mode
             PASSENGER_DISPLAY = not PASSENGER_DISPLAY
             output("Switched to " .. (PASSENGER_DISPLAY and "Passenger" or "Debug") .. " display", 1, 1, colors.yellow)
             sleep(1)
-            
+                
         elseif param == keys.s then
             getNetworkStatus()
             
@@ -725,6 +833,48 @@ while true do
                 output("No updates available", 1, 2, colors.gray)
                 sleep(2)
             end
+
+        elseif param == keys.m then
+            -- Toggle assembly mode
+            local data = getStationData()
+            local success, msg
+            if data.assembly_mode then
+                success, msg = exitAssemblyMode()
+            else
+                success, msg = enterAssemblyMode()
+            end
+            
+            output(msg, 1, 1, success and colors.yellow or colors.red)
+            
+            -- Force immediate update
+            os.cancelTimer(updateTimer)
+            updateTimer = os.startTimer(0.1)
+            
+            sleep(2)
+            
+        elseif param == keys.a then
+            -- Assemble train
+            local success, msg = assembleTrain()
+            
+            output(msg, 1, 1, success and colors.green or colors.red)
+            
+            -- Force immediate update
+            os.cancelTimer(updateTimer)
+            updateTimer = os.startTimer(0.1)
+            
+            sleep(2)
+            
+        elseif param == keys.d then
+            -- Disassemble train
+            local success, msg = disassembleTrain()
+            
+            output(msg, 1, 1, success and colors.green or colors.red)
+            
+            -- Force immediate update
+            os.cancelTimer(updateTimer)
+            updateTimer = os.startTimer(0.1)
+            
+            sleep(2)
             
         elseif param == keys.r then
             -- Manual restart
