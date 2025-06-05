@@ -25,6 +25,10 @@
       "central_monitor": "monitor_0",
       "layout_columns": "auto"
     },
+    "2": {
+      "central_monitor": "monitor_0",
+      "layout_columns": 1
+   },
     "default": {
       "central_monitor": "monitor_0",
       "layout_columns": "auto"
