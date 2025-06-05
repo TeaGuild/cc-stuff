@@ -15,7 +15,7 @@
       "central_monitor": null
     },
     "8": {
-      "central_monitor": null
+      "central_monitor": "monitor_7"
     },
     "18": {
       "central_monitor": "top",
@@ -30,7 +30,6 @@
       "layout_columns": 2
    },
     "default": {
-      "central_monitor": "monitor_0",
       "layout_columns": "auto"
     }
   },
@@ -100,21 +99,21 @@
           "display_order": 3,
           "monitor": "monitor_2"
         },
-        "8:left": {
+        "8:Create_Station_3": {
           "line": "P",
           "direction": "west",
           "next_station": "phystech",
           "platform_name": "P West",
           "display_order": 4,
-          "monitor": null
+          "monitor": "monitor_8"
         },
-        "8:right": {
+        "8:left": {
           "line": "P",
           "direction": "east",
           "next_station": "astropolis_e",
           "platform_name": "P East",
           "display_order": 5,
-          "monitor": null
+          "monitor": "monitor_6"
         },
         "16:left": {
           "line": "CM",
