@@ -21,14 +21,74 @@ local FILES = {
     }
 }
 
--- Find monitor if available
+-- Find peripherals
 local monitor = peripheral.find("monitor")
+local speaker = peripheral.find("speaker")
 local useMonitor = monitor ~= nil
+local useSpeaker = speaker ~= nil
 
 -- Setup monitor
 if useMonitor then
     monitor.setTextScale(1)
     monitor.clear()
+end
+
+-- Audio helper functions
+local function playTone(frequency, duration, volume)
+    if not useSpeaker then return end
+    
+    volume = volume or 0.3
+    local sampleRate = 48000
+    local samples = math.floor(sampleRate * duration)
+    local buffer = {}
+    
+    for i = 1, samples do
+        local t = (i - 1) / sampleRate
+        local value = math.sin(2 * math.pi * frequency * t) * 127 * volume
+        buffer[i] = math.floor(value)
+    end
+    
+    speaker.playAudio(buffer)
+end
+
+local function playSound(soundType)
+    if not useSpeaker then return end
+    
+    if soundType == "startup" then
+        -- Ascending boot sound
+        playTone(262, 0.1, 0.3)  -- C4
+        sleep(0.05)
+        playTone(330, 0.1, 0.3)  -- E4
+        sleep(0.05)
+        playTone(392, 0.2, 0.3)  -- G4
+        
+    elseif soundType == "checking" then
+        -- Quick beep
+        playTone(440, 0.05, 0.2)  -- A4
+        
+    elseif soundType == "update_found" then
+        -- Happy ascending melody
+        playTone(523, 0.1, 0.3)  -- C5
+        sleep(0.02)
+        playTone(659, 0.1, 0.3)  -- E5
+        sleep(0.02)
+        playTone(784, 0.2, 0.3)  -- G5
+        
+    elseif soundType == "success" then
+        -- Success fanfare
+        playTone(523, 0.1, 0.3)  -- C5
+        playTone(523, 0.1, 0.3)  -- C5
+        sleep(0.05)
+        playTone(784, 0.3, 0.4)  -- G5
+        
+    elseif soundType == "error" then
+        -- Sad descending tone
+        playTone(440, 0.2, 0.3)  -- A4
+        sleep(0.05)
+        playTone(349, 0.2, 0.3)  -- F4
+        sleep(0.05)
+        playTone(262, 0.3, 0.3)  -- C4
+    end
 end
 
 -- Monitor display helper
@@ -192,6 +252,9 @@ local function quickUpdateCheck()
     local updaterUpdated = false
     local details = {}
     
+    -- Play checking sound
+    playSound("checking")
+    
     -- Show initial status
     term.clear()
     term.setCursorPos(1, 1)
@@ -204,7 +267,8 @@ local function quickUpdateCheck()
     
     displayMonitorStatus("Checking updates...", {
         {text = "Repo: " .. GITHUB_REPO, color = colors.lightGray},
-        {text = "Branch: " .. GITHUB_BRANCH, color = colors.lightGray}
+        {text = "Branch: " .. GITHUB_BRANCH, color = colors.lightGray},
+        {text = "Speaker: " .. (useSpeaker and "Connected" or "Not found"), color = colors.lightGray}
     })
     
     -- Check each file
@@ -252,6 +316,7 @@ local function quickUpdateCheck()
     local statusDetails = details
     
     if updated then
+        playSound("update_found")
         table.insert(statusDetails, {text = "", color = colors.white})
         table.insert(statusDetails, {text = "Restarting soon...", color = colors.yellow})
     end
@@ -263,6 +328,9 @@ end
 
 -- Main execution
 local function main()
+    -- Play startup sound
+    playSound("startup")
+    
     -- Perform update check
     local updated, updaterUpdated = quickUpdateCheck()
     
@@ -285,6 +353,7 @@ local function main()
     -- Check if main payload exists
     local mainScript = FILES[2].local_name  -- train_station.lua
     if not fs.exists(mainScript) then
+        playSound("error")
         term.clear()
         term.setCursorPos(1, 1)
         if term.isColor() then term.setTextColor(colors.red) end
@@ -317,6 +386,8 @@ local function main()
         {text = "Loading " .. mainScript, color = colors.green}
     })
     
+    -- Play success sound before launching
+    playSound("success")
     sleep(0.5)
     clearMonitor()
     
@@ -327,6 +398,7 @@ local function main()
     
     if not ok then
         -- Script crashed
+        playSound("error")
         term.clear()
         term.setCursorPos(1, 1)
         if term.isColor() then term.setTextColor(colors.red) end
@@ -349,6 +421,7 @@ end
 -- Emergency error handler
 local ok, err = pcall(main)
 if not ok then
+    playSound("error")
     if term.isColor() then term.setTextColor(colors.red) end
     print("CRITICAL ERROR in updater:")
     term.setTextColor(colors.white)
