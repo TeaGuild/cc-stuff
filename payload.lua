@@ -76,7 +76,7 @@ local function safeCall(func, ...)
 end
 
 -- Simple debug logger
-local DEBUG = true  -- Set to true for debug output
+local DEBUG = false  -- Set to true for debug output
 local function debug(msg)
     if DEBUG then
         print("[DEBUG] " .. msg)
