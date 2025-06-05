@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "last_updated": "2025-06-05T12:00:00Z",
   "network": {
     "name": "Metro Network",
@@ -8,119 +8,173 @@
   "lines": {
     "K": {
       "name": "Наземная",
+      "name_latin": "Nazemnaya",
       "name_en": "Ground Line",
       "color": "green",
-      "type": "",
-      "trains": ["K01", "K02"],
-      "stations": [
-        {
-          "id": "spawn",
-          "name": "Спавн",
-          "name_en": "Spawn",
-          "computer_id": 11,
-          "peripheral": "top",
-          "platforms": null,
-          "connections": []
-        },
-        {
-          "id": "old_vanyuki_k",
-          "name": "Старые Ванюки",
-          "name_en": "Old Vanyuki",
-          "computer_id": [9, 10],
-          "peripheral": "bottom",
-          "platforms": {
-            "inbound": { "computer_id": 9, "peripheral": "bottom" },
-            "outbound": { "computer_id": 10, "peripheral": "bottom" }
-          },
-          "connections": ["P", "CM"]
-        },
-        {
-          "id": "shore",
-          "name": "Берег",
-          "name_en": "Shore",
-          "computer_id": 18,
-          "peripheral": "left",
-          "platforms": null,
-          "connections": []
-        },
-        {
-          "id": "lake",
-          "name": "Озерная",
-          "name_en": "Lake",
-          "computer_id": 20,
-          "peripheral": "left",
-          "platforms": null,
-          "connections": []
-        }
-      ]
+      "type": "linear",
+      "trains": ["K01", "K02"]
     },
     "P": {
       "name": "Подземная",
+      "name_latin": "Podzemnaya", 
       "name_en": "Underground Line",
       "color": "orange",
       "type": "linear",
-      "trains": ["P04", "P05"],
-      "stations": [
-        {
-          "id": "phystech",
-          "name": "Физтех",
-          "name_en": "Phystech",
-          "computer_id": 2,
-          "peripheral": "left",
-          "platforms": null,
-          "connections": []
-        },
-        {
-          "id": "old_vanyuki_p",
-          "name": "Старые Ванюки",
-          "name_en": "Old Vanyuki",
-          "computer_id": 8,
-          "peripheral": "left",
-          "platforms": null,
-          "connections": ["K", "CM"]
-        },
-        {
-          "id": "astropolis_e",
-          "name": "Astropolis - E",
-          "name_en": "Astropolis - E",
-          "computer_id": 7,
-          "peripheral": "Create_Station_0",
-          "platforms": null,
-          "connections": []
-        }
-      ]
+      "trains": ["P04", "P05"]
     },
     "CM": {
       "name": "Скоростной Монорельс",
+      "name_latin": "Skorostnoy Monorels",
       "name_en": "Swift Monorail",
       "color": "red",
       "type": "linear",
-      "trains": ["CM1"],
-      "stations": [
-        {
-          "id": "old_vanyuki_cm",
-          "name": "Старые Ванюки",
-          "name_en": "Old Vanyuki",
-          "computer_id": 16,
-          "peripheral": "left",
-          "platforms": null,
-          "connections": ["K", "P"]
-        }
-      ]
+      "trains": ["CM1"]
     }
   },
-  "station_groups": {
+  "stations": {
+    "spawn": {
+      "name": "Спавн",
+      "name_latin": "Spawn",
+      "name_en": "Spawn",
+      "lines": ["K"],
+      "platforms": {
+        "11:top": {
+          "line": "K",
+          "direction": "south",
+          "next_station": "old_vanyuki",
+          "platform_name": "Platform 1"
+        }
+      },
+      "transfer": false
+    },
     "old_vanyuki": {
       "name": "Старые Ванюки",
+      "name_latin": "Starye Vanyuki",
       "name_en": "Old Vanyuki",
-      "stations": ["old_vanyuki_k", "old_vanyuki_p", "old_vanyuki_cm"],
-      "transfer_station": true
+      "lines": ["K", "P", "CM"],
+      "platforms": {
+        "9:bottom": {
+          "line": "K",
+          "direction": "north",
+          "next_station": "spawn",
+          "platform_name": "K North"
+        },
+        "10:bottom": {
+          "line": "K",
+          "direction": "south",
+          "next_station": "shore",
+          "platform_name": "K South"
+        },
+        "8:left": {
+          "line": "P",
+          "direction": "west",
+          "next_station": "phystech",
+          "platform_name": "P West"
+        },
+        "8:right": {
+          "line": "P",
+          "direction": "east",
+          "next_station": "astropolis_e",
+          "platform_name": "P East"
+        },
+        "16:left": {
+          "line": "CM",
+          "direction": "north",
+          "next_station": null,
+          "platform_name": "CM Terminal"
+        }
+      },
+      "transfer": true
+    },
+    "phystech": {
+      "name": "Физтех",
+      "name_latin": "Fiztech",
+      "name_en": "Phystech",
+      "lines": ["P"],
+      "platforms": {
+        "2:left": {
+          "line": "P",
+          "direction": "west",
+          "next_station": null,
+          "platform_name": "West Terminal"
+        },
+        "2:Create_Station_2": {
+          "line": "P",
+          "direction": "east",
+          "next_station": "old_vanyuki",
+          "platform_name": "East Platform"
+        }
+      },
+      "transfer": false
+    },
+    "astropolis_e": {
+      "name": "Астрополис-В",
+      "name_latin": "Astropolis-V",
+      "name_en": "Astropolis-E",
+      "lines": ["P"],
+      "platforms": {
+        "7:Create_Station_0": {
+          "line": "P",
+          "direction": "west",
+          "next_station": "old_vanyuki",
+          "platform_name": "West Platform"
+        },
+        "7:Create_Station_1": {
+          "line": "P",
+          "direction": "east",
+          "next_station": null,
+          "platform_name": "East Terminal"
+        }
+      },
+      "transfer": false
+    },
+    "shore": {
+      "name": "Берег",
+      "name_latin": "Bereg",
+      "name_en": "Shore",
+      "lines": ["K"],
+      "platforms": {
+        "18:left": {
+          "line": "K",
+          "direction": "north",
+          "next_station": "old_vanyuki",
+          "platform_name": "North Platform"
+        },
+        "18:right": {
+          "line": "K",
+          "direction": "south",
+          "next_station": "lake",
+          "platform_name": "South Platform"
+        }
+      },
+      "transfer": false
+    },
+    "lake": {
+      "name": "Озерная",
+      "name_latin": "Ozernaya",
+      "name_en": "Lake",
+      "lines": ["K"],
+      "platforms": {
+        "20:left": {
+          "line": "K",
+          "direction": "north",
+          "next_station": "shore",
+          "platform_name": "North Platform"
+        },
+        "20:right": {
+          "line": "K",
+          "direction": "south",
+          "next_station": null,
+          "platform_name": "South Terminal"
+        }
+      },
+      "transfer": false
     }
   },
   "colors": {
     "K": {
       "primary": "colors.green",
-      "secondary": "colors.orange",
+      "secondary": "colors.lime",
       "text": "colors.white"
     },
     "P": {
@@ -138,7 +192,8 @@
     "update_interval": 2,
     "sound_enabled": true,
     "animation_speed": 0.1,
-    "show_english": true,
-    "time_format": "24h"
+    "show_latin": true,
+    "time_format": "24h",
+    "platform_display_mode": "compact"
   }
 }
