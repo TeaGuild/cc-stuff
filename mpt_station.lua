@@ -1,6 +1,11 @@
--- Multi-Platform Train Station Controller with Graphics
--- Supports multiple station peripherals on one computer with visual display
--- Version 2.0 - Uses improved manifest format with platform-based organization
+-- Multi-Platform Train Station Controller with Multiple Monitor Support
+-- Supports three monitor configurations per computer:
+--   1. Central monitor only - Overview of all platforms
+--   2. Platform monitors only - Dedicated display per platform
+--   3. Both central and platform monitors
+-- Configuration is per-computer ID in the manifest
+-- Layout dynamically adjusts based on number of platforms
+-- Version 3.0 - Uses manifest-based monitor configuration
 
 -- Configuration
 local SERVER_URL = "https://ryusei.bun-procyon.ts.net"
@@ -43,22 +48,31 @@ if #STATION_IDS == 0 then
     error("No Create train stations found!")
 end
 
--- Find peripherals
-local monitor = peripheral.find("monitor")
-local speaker = peripheral.find("speaker")
-local useMonitor = monitor ~= nil
-local useSpeaker = speaker ~= nil
+-- Find all monitors
+local monitors = {}
+local centralMonitor = nil
 
--- Monitor setup
-if useMonitor then
-    monitor.setTextScale(0.5)  -- Smaller text for more info
-    monitor.clear()
+-- Scan for all monitors
+for _, name in ipairs(peripherals) do
+    if peripheral.getType(name) == "monitor" then
+        local mon = peripheral.wrap(name)
+        if mon then
+            monitors[name] = mon
+            print("Found monitor: " .. name)
+        end
+    end
 end
+
+-- Find speaker
+local speaker = peripheral.find("speaker")
+local useSpeaker = speaker ~= nil
 
 -- Global state
 local manifest = nil
 local stationData = {}  -- Keyed by station ID
 local platformInfo = {}  -- Manifest data per station ID
+local platformMonitors = {}  -- Maps station ID to dedicated monitor
+local computerConfig = nil  -- This computer's configuration
 local lastManifestUpdate = 0
 local soundEnabled = true
 local lastSoundTime = {}  -- Per station ID
@@ -164,10 +178,42 @@ local function downloadManifest()
     return manifest, nil
 end
 
--- Process manifest to create platform lookup
+-- Process manifest to create platform lookup and configure monitors
 local function processManifest(manifest)
     platformInfo = {}
+    platformMonitors = {}
     
+    -- Get computer-specific configuration
+    computerConfig = nil
+    if manifest.computer_configs then
+        -- Try to find config for this computer ID
+        computerConfig = manifest.computer_configs[tostring(COMPUTER_ID)]
+        
+        -- Fall back to default if not found
+        if not computerConfig and manifest.computer_configs.default then
+            computerConfig = manifest.computer_configs.default
+            print("Using default computer configuration")
+        end
+    end
+    
+    -- Configure central monitor if specified in computer config
+    if computerConfig and computerConfig.central_monitor then
+        centralMonitor = monitors[computerConfig.central_monitor]
+        if centralMonitor then
+            centralMonitor.setTextScale(0.5)
+            centralMonitor.clear()
+            print("Central monitor configured: " .. computerConfig.central_monitor)
+        else
+            print("Warning: Central monitor '" .. computerConfig.central_monitor .. "' not found")
+            centralMonitor = nil
+        end
+    else
+        -- No central monitor specified for this computer
+        centralMonitor = nil
+        print("No central monitor configured for computer " .. COMPUTER_ID)
+    end
+    
+    -- Process platforms
     for stationName, station in pairs(manifest.stations) do
         for platformId, platform in pairs(station.platforms) do
             platformInfo[platformId] = {
@@ -179,6 +225,7 @@ local function processManifest(manifest)
                 next_station = platform.next_station,
                 platform_name = platform.platform_name,
                 is_transfer = station.transfer,
+                display_order = platform.display_order or 999,
                 connections = {}
             }
             
@@ -187,6 +234,14 @@ local function processManifest(manifest)
                 if line ~= platform.line then
                     table.insert(platformInfo[platformId].connections, line)
                 end
+            end
+            
+            -- Configure platform-specific monitor if specified
+            if platform.monitor and monitors[platform.monitor] then
+                platformMonitors[platformId] = monitors[platform.monitor]
+                platformMonitors[platformId].setTextScale(1)
+                platformMonitors[platformId].clear()
+                print("Platform monitor for " .. platformId .. ": " .. platform.monitor)
             end
         end
     end
@@ -220,6 +275,7 @@ local function getStationData(station, stationId)
         data.platform_name = pInfo.platform_name
         data.is_transfer = pInfo.is_transfer
         data.connections = pInfo.connections
+        data.display_order = pInfo.display_order
     end
     
     return data
@@ -245,8 +301,8 @@ local function sendUpdate(data)
 end
 
 -- Draw a box on monitor
-local function drawBox(x, y, width, height, color)
-    if not useMonitor then return end
+local function drawBox(monitor, x, y, width, height, color)
+    if not monitor then return end
     
     monitor.setBackgroundColor(color)
     for row = y, y + height - 1 do
@@ -257,8 +313,8 @@ local function drawBox(x, y, width, height, color)
 end
 
 -- Draw text with background
-local function drawText(x, y, text, textColor, bgColor)
-    if not useMonitor then return end
+local function drawText(monitor, x, y, text, textColor, bgColor)
+    if not monitor then return end
     
     monitor.setCursorPos(x, y)
     monitor.setTextColor(textColor or colors.white)
@@ -268,35 +324,69 @@ local function drawText(x, y, text, textColor, bgColor)
     monitor.setTextColor(colors.white)
 end
 
--- Draw station display
-local function drawStationDisplay(startX, startY, width, height, data)
-    if not useMonitor then return end
+-- Draw station display on a monitor
+local function drawStationDisplay(monitor, startX, startY, width, height, data)
+    if not monitor then return end
     
     -- Clear area
-    drawBox(startX, startY, width, height, colors.black)
+    drawBox(monitor, startX, startY, width, height, colors.black)
     
     -- Get line color
     local lineColor = LINE_COLORS[data.line] or LINE_COLORS.default
     
+    -- Minimum display mode for very small areas
+    if height < 8 or width < 15 then
+        -- Ultra compact mode - just show line and status
+        drawBox(monitor, startX, startY, width, 1, lineColor)
+        local shortName = string.sub(data.platform_name or data.station_name, 1, width - 2)
+        drawText(monitor, startX + 1, startY, shortName, colors.white, lineColor)
+        
+        local statusY = startY + 2
+        local statusChar = " "
+        local statusColor = colors.lightGray
+        
+        if data.train_present then
+            statusChar = "T"
+            statusColor = colors.green
+        elseif data.train_imminent then
+            statusChar = "!"
+            statusColor = colors.yellow
+        elseif data.train_enroute then
+            statusChar = "~"
+            statusColor = colors.orange
+        end
+        
+        drawText(monitor, startX + math.floor(width/2), statusY, statusChar, statusColor, colors.black)
+        return
+    end
+    
+    -- Normal display mode
     -- Header bar with line color
-    drawBox(startX, startY, width, 3, lineColor)
+    local headerHeight = math.min(3, math.floor(height * 0.3))
+    drawBox(monitor, startX, startY, width, headerHeight, lineColor)
     
     -- Station name
     local stationName = data.manifest_name or data.station_name
     if #stationName > width - 2 then
         stationName = string.sub(stationName, 1, width - 5) .. "..."
     end
-    drawText(startX + 1, startY + 1, stationName, colors.white, lineColor)
+    drawText(monitor, startX + 1, startY + 1, stationName, colors.white, lineColor)
     
-    -- Platform and direction info
-    local platformText = data.platform_name or "Platform"
-    if data.direction then
-        platformText = platformText .. " " .. (DIRECTION_SYMBOLS[data.direction] or data.direction)
+    -- Platform and direction info (if space allows)
+    if headerHeight >= 2 then
+        local platformText = data.platform_name or "Platform"
+        if data.direction then
+            platformText = platformText .. " " .. (DIRECTION_SYMBOLS[data.direction] or data.direction)
+        end
+        if #platformText > width - 2 then
+            platformText = string.sub(platformText, 1, width - 5) .. "..."
+        end
+        drawText(monitor, startX + 1, startY + 2, platformText, colors.white, lineColor)
     end
-    drawText(startX + 1, startY + 2, platformText, colors.white, lineColor)
     
     -- Status area
-    local statusY = startY + 4
+    local statusY = startY + headerHeight + 1
+    local statusHeight = math.min(3, math.floor(height * 0.3))
     local statusColor = colors.lightGray
     local statusText = "IDLE"
     local trainInfo = nil
@@ -317,102 +407,278 @@ local function drawStationDisplay(startX, startY, width, height, data)
     end
     
     -- Status box
-    drawBox(startX + 1, statusY, width - 2, 3, statusColor)
-    drawText(startX + 2, statusY + 1, statusText, colors.black, statusColor)
-    
-    if trainInfo then
-        drawText(startX + 2, statusY + 2, trainInfo, colors.black, statusColor)
+    if height > 10 then
+        drawBox(monitor, startX + 1, statusY, width - 2, statusHeight, statusColor)
+        
+        -- Center status text
+        if #statusText > width - 4 then
+            statusText = string.sub(statusText, 1, width - 7) .. "..."
+        end
+        local statusX = startX + math.floor((width - #statusText) / 2)
+        drawText(monitor, statusX, statusY + 1, statusText, colors.black, statusColor)
+        
+        if trainInfo and statusHeight > 2 then
+            if #trainInfo > width - 4 then
+                trainInfo = string.sub(trainInfo, 1, width - 7) .. "..."
+            end
+            local trainX = startX + math.floor((width - #trainInfo) / 2)
+            drawText(monitor, trainX, statusY + 2, trainInfo, colors.black, statusColor)
+        end
+    else
+        -- Compact status display
+        if #statusText > width - 2 then
+            statusText = string.sub(statusText, 1, 3) .. ".."
+        end
+        drawText(monitor, startX + 1, statusY, statusText, statusColor, colors.black)
     end
     
-    -- Next station info
-    if data.next_station and manifest and manifest.stations[data.next_station] then
-        local nextY = statusY + 4
-        drawText(startX + 1, nextY, "Next:", colors.gray, colors.black)
+    -- Next station info (if space allows)
+    if height > 12 and data.next_station and manifest and manifest.stations[data.next_station] then
+        local nextY = statusY + statusHeight + 1
+        drawText(monitor, startX + 1, nextY, "Next:", colors.gray, colors.black)
         local nextName = showLatinNames and 
             manifest.stations[data.next_station].name_latin or 
             manifest.stations[data.next_station].name_en
         if #nextName > width - 7 then
             nextName = string.sub(nextName, 1, width - 10) .. "..."
         end
-        drawText(startX + 7, nextY, nextName, colors.lightGray, colors.black)
+        drawText(monitor, startX + 7, nextY, nextName, colors.lightGray, colors.black)
     end
     
-    -- Visual train indicator
+    -- Visual train indicator (only if enough space)
     if height > 15 then
         local trackY = startY + height - 5
         
         -- Draw track
-        drawBox(startX + 2, trackY, width - 4, 1, colors.gray)
+        drawBox(monitor, startX + 2, trackY, width - 4, 1, colors.gray)
         
         -- Draw direction indicator
         if data.direction then
             local dirSymbol = DIRECTION_SYMBOLS[data.direction] or "?"
-            drawText(startX + width - 3, trackY, dirSymbol, colors.yellow, colors.gray)
+            drawText(monitor, startX + width - 3, trackY, dirSymbol, colors.yellow, colors.gray)
         end
         
         -- Draw train if present
         if data.train_present then
             local trainX = startX + math.floor(width / 2) - 2
-            drawBox(trainX, trackY - 1, 5, 3, colors.cyan)
-            drawText(trainX + 1, trackY, "===", colors.black, colors.cyan)
+            drawBox(monitor, trainX, trackY - 1, 5, 3, colors.cyan)
+            drawText(monitor, trainX + 1, trackY, "===", colors.black, colors.cyan)
         elseif data.train_imminent then
             -- Animate approaching train
             local offset = math.floor((os.clock() * 10) % 5)
             local trainX = startX + 2 + offset
-            drawBox(trainX, trackY - 1, 3, 3, colors.yellow)
-            drawText(trainX, trackY, ">>>", colors.black, colors.yellow)
+            if trainX + 3 < startX + width - 2 then
+                drawBox(monitor, trainX, trackY - 1, 3, 3, colors.yellow)
+                drawText(monitor, trainX, trackY, ">>>", colors.black, colors.yellow)
+            end
         end
     end
     
-    -- Connection info (for transfer stations)
-    if data.is_transfer and data.connections and #data.connections > 0 then
+    -- Connection info (for transfer stations, only if space)
+    if height > 18 and data.is_transfer and data.connections and #data.connections > 0 then
         local connY = startY + height - 2
         local connections = "Transfer: " .. table.concat(data.connections, ", ")
         if #connections > width - 2 then
             connections = string.sub(connections, 1, width - 5) .. "..."
         end
-        drawText(startX + 1, connY, connections, colors.lightGray, colors.black)
+        drawText(monitor, startX + 1, connY, connections, colors.lightGray, colors.black)
     end
 end
 
--- Main display function
-local function updateDisplay()
-    if not useMonitor then return end
+-- Draw individual platform monitor (full screen)
+local function drawPlatformMonitor(monitor, data)
+    if not monitor then return end
     
     monitor.clear()
     local monWidth, monHeight = monitor.getSize()
     
-    -- Calculate layout
-    local numStations = #STATION_IDS
-    local stationsPerRow = math.min(numStations, 2)  -- Max 2 stations per row
-    local rows = math.ceil(numStations / stationsPerRow)
+    -- Get line color
+    local lineColor = LINE_COLORS[data.line] or LINE_COLORS.default
     
-    local stationWidth = math.floor(monWidth / stationsPerRow)
-    local stationHeight = math.floor(monHeight / rows)
+    -- Large header
+    drawBox(monitor, 1, 1, monWidth, 4, lineColor)
     
-    -- Draw each station
-    local stationIndex = 0
-    for row = 1, rows do
-        for col = 1, stationsPerRow do
-            stationIndex = stationIndex + 1
-            if stationIndex <= numStations then
-                local stationId = STATION_IDS[stationIndex]
-                local data = stationData[stationId]
-                
-                if data then
-                    local x = (col - 1) * stationWidth + 1
-                    local y = (row - 1) * stationHeight + 1
-                    
-                    drawStationDisplay(x, y, stationWidth - 1, stationHeight - 1, data)
-                end
+    -- Station name (centered)
+    local stationName = data.manifest_name or data.station_name
+    local nameX = math.floor((monWidth - #stationName) / 2) + 1
+    drawText(monitor, nameX, 2, stationName, colors.white, lineColor)
+    
+    -- Platform info (centered)
+    local platformText = data.platform_name or "Platform"
+    if data.direction then
+        platformText = platformText .. " " .. (DIRECTION_SYMBOLS[data.direction] or data.direction)
+    end
+    local platX = math.floor((monWidth - #platformText) / 2) + 1
+    drawText(monitor, platX, 3, platformText, colors.white, lineColor)
+    
+    -- Large status display
+    local statusY = 6
+    local statusHeight = 5
+    local statusColor = colors.lightGray
+    local statusText = "IDLE"
+    local trainInfo = nil
+    
+    if data.assembly_mode then
+        statusColor = colors.purple
+        statusText = "ASSEMBLY MODE"
+    elseif data.train_present then
+        statusColor = colors.green
+        statusText = "TRAIN AT PLATFORM"
+        trainInfo = data.train_name or "Unknown"
+    elseif data.train_imminent then
+        statusColor = colors.yellow
+        statusText = "TRAIN ARRIVING"
+    elseif data.train_enroute then
+        statusColor = colors.orange
+        statusText = "TRAIN ENROUTE"
+    end
+    
+    -- Status box
+    drawBox(monitor, 2, statusY, monWidth - 2, statusHeight, statusColor)
+    local statusX = math.floor((monWidth - #statusText) / 2) + 1
+    drawText(monitor, statusX, statusY + 2, statusText, colors.black, statusColor)
+    
+    if trainInfo then
+        local trainX = math.floor((monWidth - #trainInfo) / 2) + 1
+        drawText(monitor, trainX, statusY + 3, trainInfo, colors.black, statusColor)
+    end
+    
+    -- Next station
+    if data.next_station and manifest and manifest.stations[data.next_station] then
+        local nextY = statusY + statusHeight + 2
+        local nextName = showLatinNames and 
+            manifest.stations[data.next_station].name_latin or 
+            manifest.stations[data.next_station].name_en
+        local nextText = "Next: " .. nextName
+        local nextX = math.floor((monWidth - #nextText) / 2) + 1
+        drawText(monitor, nextX, nextY, nextText, colors.lightGray, colors.black)
+    end
+    
+    -- Large visual indicator
+    local visualY = monHeight - 8
+    
+    -- Draw platform
+    drawBox(monitor, 2, visualY + 3, monWidth - 2, 2, colors.gray)
+    
+    -- Draw train visualization
+    if data.train_present then
+        -- Large train
+        local trainWidth = math.min(monWidth - 4, 20)
+        local trainX = math.floor((monWidth - trainWidth) / 2) + 1
+        drawBox(monitor, trainX, visualY, trainWidth, 5, colors.cyan)
+        
+        -- Train details
+        local trainText = "[===TRAIN===]"
+        local textX = math.floor((monWidth - #trainText) / 2) + 1
+        drawText(monitor, textX, visualY + 2, trainText, colors.black, colors.cyan)
+        
+    elseif data.train_imminent then
+        -- Animated approaching indicator
+        local phase = math.floor((os.clock() * 2) % 3)
+        local arrow = phase == 0 and ">>>" or phase == 1 and " >>>" or "  >>>"
+        drawText(monitor, 4, visualY + 2, arrow, colors.yellow, colors.black)
+        drawText(monitor, 6 + #arrow, visualY + 2, "APPROACHING", colors.yellow, colors.black)
+    end
+    
+    -- Time and line indicator
+    drawText(monitor, 1, monHeight, os.date("%H:%M:%S"), colors.gray, colors.black)
+    drawText(monitor, monWidth - 10, monHeight, "Line " .. data.line, lineColor, colors.black)
+end
+
+-- Update central display
+local function updateCentralDisplay()
+    if not centralMonitor then return end
+    
+    centralMonitor.clear()
+    local monWidth, monHeight = centralMonitor.getSize()
+    
+    -- Sort stations by display_order
+    local sortedStations = {}
+    for stationId, data in pairs(stationData) do
+        table.insert(sortedStations, {id = stationId, data = data})
+    end
+    table.sort(sortedStations, function(a, b)
+        local orderA = a.data.display_order or 999
+        local orderB = b.data.display_order or 999
+        return orderA < orderB
+    end)
+    
+    -- Calculate dynamic layout
+    local numStations = #sortedStations
+    if numStations == 0 then return end
+    
+    -- Get configured columns or calculate based on monitor width
+    local layoutCols = 2  -- Default
+    if computerConfig and computerConfig.layout_columns then
+        if type(computerConfig.layout_columns) == "number" and computerConfig.layout_columns > 0 then
+            layoutCols = computerConfig.layout_columns
+        elseif computerConfig.layout_columns == "auto" then
+            -- Auto-calculate columns based on monitor width
+            -- Assume each station needs at least 25 chars width
+            layoutCols = math.max(1, math.floor(monWidth / 25))
+        end
+    else
+        -- Auto-calculate columns based on monitor width
+        layoutCols = math.max(1, math.floor(monWidth / 25))
+    end
+    
+    -- Calculate rows needed
+    local layoutRows = math.ceil(numStations / layoutCols)
+    
+    -- Calculate display dimensions
+    local stationWidth = math.floor(monWidth / layoutCols)
+    local stationHeight = math.floor((monHeight - 1) / layoutRows)  -- -1 for footer
+    
+    -- Ensure minimum height
+    if stationHeight < 10 then
+        -- Too many stations for display, try to adjust
+        if layoutCols > 1 then
+            layoutCols = math.max(1, layoutCols - 1)
+            layoutRows = math.ceil(numStations / layoutCols)
+            stationWidth = math.floor(monWidth / layoutCols)
+            stationHeight = math.floor((monHeight - 1) / layoutRows)
+        end
+        
+        -- If still too small, use ultra-compact mode
+        if stationHeight < 6 then
+            print("Warning: Monitor too small for " .. numStations .. " stations")
+        end
+    end
+    
+    -- Draw each station in order
+    for index, station in ipairs(sortedStations) do
+        if index <= layoutCols * layoutRows then
+            local col = ((index - 1) % layoutCols) + 1
+            local row = math.floor((index - 1) / layoutCols) + 1
+            
+            local x = (col - 1) * stationWidth + 1
+            local y = (row - 1) * stationHeight + 1
+            
+            -- Ensure we don't overflow the monitor
+            if y + stationHeight <= monHeight then
+                drawStationDisplay(centralMonitor, x, y, stationWidth - 1, stationHeight - 1, station.data)
             end
         end
     end
     
     -- Footer
-    drawText(1, monHeight, os.date("%H:%M:%S"), colors.gray, colors.black)
+    drawText(centralMonitor, 1, monHeight, os.date("%H:%M:%S"), colors.gray, colors.black)
     local nameMode = showLatinNames and "Latin" or "English"
-    drawText(monWidth - 15, monHeight, nameMode .. " C" .. COMPUTER_ID, colors.gray, colors.black)
+    local layoutInfo = layoutCols .. "x" .. layoutRows
+    if computerConfig and computerConfig.layout_columns == "auto" then
+        layoutInfo = layoutInfo .. "A"  -- A for auto
+    end
+    drawText(centralMonitor, monWidth - 22, monHeight, layoutInfo .. " " .. nameMode .. " C" .. COMPUTER_ID, colors.gray, colors.black)
+end
+
+-- Update individual platform monitors
+local function updatePlatformMonitors()
+    for stationId, monitor in pairs(platformMonitors) do
+        local data = stationData[stationId]
+        if data then
+            drawPlatformMonitor(monitor, data)
+        end
+    end
 end
 
 -- Terminal display
@@ -425,38 +691,83 @@ local function displayTerminal()
     term.setTextColor(colors.white)
     print("Computer ID: " .. COMPUTER_ID)
     print("Stations: " .. #STATION_IDS)
+    
+    -- Show monitor configuration
+    local monitorConfig = "Monitors: "
+    local monitorCount = 0
+    if centralMonitor then
+        monitorConfig = monitorConfig .. "Central"
+        monitorCount = monitorCount + 1
+    end
+    
+    local platformMonCount = 0
+    for _ in pairs(platformMonitors) do
+        platformMonCount = platformMonCount + 1
+    end
+    
+    if platformMonCount > 0 then
+        if monitorCount > 0 then
+            monitorConfig = monitorConfig .. " + "
+        end
+        monitorConfig = monitorConfig .. platformMonCount .. " platform"
+        monitorCount = monitorCount + platformMonCount
+    end
+    
+    if monitorCount == 0 then
+        monitorConfig = monitorConfig .. "None (terminal only)"
+    end
+    
+    print(monitorConfig)
     print("Name Mode: " .. (showLatinNames and "Latin" or "English"))
     print("")
     
+    -- Sort stations for terminal display
+    local sortedStations = {}
+    for stationId, data in pairs(stationData) do
+        table.insert(sortedStations, {id = stationId, data = data})
+    end
+    table.sort(sortedStations, function(a, b)
+        local orderA = a.data.display_order or 999
+        local orderB = b.data.display_order or 999
+        return orderA < orderB
+    end)
+    
     -- Show each station status
-    for i, stationId in ipairs(STATION_IDS) do
-        local data = stationData[stationId]
-        if data then
-            if term.isColor() then 
-                term.setTextColor(LINE_COLORS[data.line] or colors.white)
-            end
-            print("Platform " .. i .. ": " .. stationId)
-            
-            term.setTextColor(colors.white)
-            print("  Name: " .. (data.manifest_name or data.station_name))
-            print("  Line: " .. (data.line or "Unknown") .. 
-                  " " .. (DIRECTION_SYMBOLS[data.direction] or ""))
-            
-            local status = "Idle"
-            if data.train_present then
-                status = "Train: " .. (data.train_name or "Unknown")
-            elseif data.train_imminent then
-                status = "Train arriving"
-            elseif data.train_enroute then
-                status = "Train enroute"
-            end
-            print("  Status: " .. status)
-            
-            if data.next_station then
-                print("  Next: " .. data.next_station)
-            end
-            print("")
+    for index, station in ipairs(sortedStations) do
+        local data = station.data
+        
+        if term.isColor() then 
+            term.setTextColor(LINE_COLORS[data.line] or colors.white)
         end
+        print("Platform " .. index .. ": " .. station.id)
+        
+        term.setTextColor(colors.white)
+        print("  Name: " .. (data.manifest_name or data.station_name))
+        print("  Line: " .. (data.line or "Unknown") .. 
+              " " .. (DIRECTION_SYMBOLS[data.direction] or ""))
+        
+        local status = "Idle"
+        if data.train_present then
+            status = "Train: " .. (data.train_name or "Unknown")
+        elseif data.train_imminent then
+            status = "Train arriving"
+        elseif data.train_enroute then
+            status = "Train enroute"
+        end
+        print("  Status: " .. status)
+        
+        if data.next_station then
+            print("  Next: " .. data.next_station)
+        end
+        
+        -- Show if has dedicated monitor
+        if platformMonitors[station.id] then
+            if term.isColor() then term.setTextColor(colors.lightBlue) end
+            print("  [Has dedicated monitor]")
+            term.setTextColor(colors.white)
+        end
+        
+        print("")
     end
     
     -- Controls
@@ -468,10 +779,14 @@ end
 
 -- Main program
 print("Starting Multi-Platform Station Controller...")
-print("Found " .. #STATION_IDS .. " stations:")
-for _, id in ipairs(STATION_IDS) do
-    print("  " .. id)
+print("Found " .. #STATION_IDS .. " stations")
+
+-- Count monitors
+local monitorCount = 0
+for _ in pairs(monitors) do
+    monitorCount = monitorCount + 1
 end
+print("Found " .. monitorCount .. " monitors")
 
 -- Play startup sound
 if useSpeaker then
@@ -490,6 +805,53 @@ if not manifest then
 else
     processManifest(manifest)
     print("Manifest loaded successfully")
+    
+    -- Report monitor configuration
+    print("\nMonitor configuration:")
+    if computerConfig then
+        print("  Using config for computer " .. COMPUTER_ID)
+    else
+        print("  No config found for computer " .. COMPUTER_ID)
+        if manifest and manifest.computer_configs and manifest.computer_configs.default then
+            print("  (Default config exists but wasn't applied)")
+        end
+    end
+    
+    if centralMonitor then
+        print("  Central monitor: Active")
+        if computerConfig and computerConfig.layout_columns then
+            if computerConfig.layout_columns == "auto" then
+                print("  Layout columns: Auto")
+            else
+                print("  Layout columns: " .. computerConfig.layout_columns)
+            end
+        else
+            print("  Layout columns: Auto")
+        end
+    else
+        print("  Central monitor: Not configured")
+    end
+    
+    local platformMonCount = 0
+    for _ in pairs(platformMonitors) do
+        platformMonCount = platformMonCount + 1
+    end
+    
+    if platformMonCount > 0 then
+        print("  Platform monitors: " .. platformMonCount .. " active")
+        for stationId, _ in pairs(platformMonitors) do
+            local pInfo = platformInfo[stationId]
+            if pInfo then
+                print("    - " .. (pInfo.platform_name or stationId))
+            end
+        end
+    else
+        print("  Platform monitors: None configured")
+    end
+    
+    if not centralMonitor and platformMonCount == 0 then
+        print("  Running in terminal-only mode")
+    end
 end
 
 sleep(2)
@@ -537,7 +899,8 @@ while true do
         
         -- Update displays
         displayTerminal()
-        updateDisplay()
+        updateCentralDisplay()
+        updatePlatformMonitors()
         
         updateTimer = os.startTimer(UPDATE_INTERVAL)
         
