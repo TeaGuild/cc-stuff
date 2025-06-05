@@ -15,6 +15,18 @@
       ]
     },
     {
+      "id": "depot_station",
+      "name": "Depot Station Controller",
+      "description": "Minimal depot controller for train assembly/disassembly",
+      "file": "depot_station.lua",
+      "local_name": "depot_station.lua",
+      "category": "Create Mod",
+      "requirements": [
+        "Create train station peripheral (depot)",
+        "Optional: Speaker for audio feedback"
+      ]
+    },
+    {
       "id": "hello_world",
       "name": "Hello World Demo",
       "description": "Simple demo script with monitor display",
