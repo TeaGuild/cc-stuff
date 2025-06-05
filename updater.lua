@@ -1,57 +1,160 @@
--- Train Station Network Client with Auto-Updates and Sound
--- Reports station data to central server with passenger display and audio notifications
--- Includes background update checking from GitHub
+-- GitHub Auto-Updater for ComputerCraft with Manifest Support
+-- Self-updating startup script that manages multiple scripts from GitHub
+-- Uses MD5 hash comparison and manifest-based script selection
 
 -- Configuration
-local SERVER_URL = "https://ryusei.bun-procyon.ts.net"
-local UPDATE_INTERVAL = 2  -- seconds for station updates
-local PASSENGER_DISPLAY = true  -- Set to false for debug display
+local GITHUB_USER = "TeaGuild"
+local GITHUB_REPO = "cc-stuff"
+local GITHUB_BRANCH = "master"
+local CONFIG_FILE = ".updater_config"
+local MANIFEST_URL = "manifest.json"
 
--- GitHub update configuration
-local UPDATE_CHECK_INTERVAL = 3600  -- Check for updates every hour
-local STARTUP_SCRIPT = "startup.lua"  -- The updater script name
+-- MD5 implementation by Anavrins
+local mod32 = 2^32
+local bor = bit32.bor
+local band = bit32.band
+local bnot = bit32.bnot
+local bxor = bit32.bxor
+local blshift = bit32.lshift
+local upack = unpack
 
--- Get computer ID for unique identification
-local COMPUTER_ID = os.getComputerID()
+local function lrotate(int, by)
+    local s = int/(2^(32-by))
+    local f = s%1
+    return (s-f)+f*mod32
+end
 
--- Find the station peripheral (more robust detection)
-local station = nil
-local PERIPHERAL_NAME = nil
+local function brshift(int, by)
+    local s = int / (2^by)
+    return s-s%1
+end
 
--- Try all possible peripheral names
-local peripherals = peripheral.getNames()
-for _, name in ipairs(peripherals) do
-    local pType = peripheral.getType(name)
-    -- Check for various possible station types
-    if pType and (
-        string.find(string.lower(pType), "station") or
-        string.find(string.lower(pType), "create") and string.find(string.lower(pType), "station") or
-        pType == "create:station" or
-        pType == "createstation" or
-        pType == "Create_Station"
-    ) then
-        -- Try to verify it's actually a station by calling a method
-        local test = peripheral.wrap(name)
-        if test and pcall(test.getStationName) then
-            station = test
-            PERIPHERAL_NAME = name
-            print("Found station peripheral: " .. name .. " (type: " .. pType .. ")")
-            break
+local s = {
+     7, 12, 17, 22,
+     5,  9, 14, 20,
+     4, 11, 16, 23,
+     6, 10, 15, 21,
+}
+
+local K = {
+    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
+    0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
+    0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,
+    0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+    0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
+    0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05,
+    0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039,
+    0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
+    0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
+}
+
+local H = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476}
+
+local function counter(incr)
+    local t1, t2 = 0, 0
+    if 0xFFFFFFFF - t1 < incr then
+        t2 = t2 + 1
+        t1 = incr - (0xFFFFFFFF - t1) - 1		
+    else t1 = t1 + incr
+    end
+    return t2, t1
+end
+
+local function LE_toInt(bs, i)
+    return (bs[i] or 0) + blshift((bs[i+1] or 0), 8) + blshift((bs[i+2] or 0), 16) + blshift((bs[i+3] or 0), 24)
+end
+
+local function preprocess(data)
+    local len = #data
+    local proc = {}
+    data[#data+1] = 0x80
+    while #data%64~=56 do data[#data+1] = 0 end
+    local blocks = math.ceil(#data/64)
+    for i = 1, blocks do
+        proc[i] = {}
+        for j = 1, 16 do
+            proc[i][j] = LE_toInt(data, 1+((i-1)*64)+((j-1)*4))
         end
     end
+    proc[blocks][16], proc[blocks][15] = counter(len*8)
+    return proc
 end
 
-if not station then
-    print("ERROR: No Create train station found!")
-    print("Available peripherals:")
-    for _, name in ipairs(peripherals) do
-        print("  " .. name .. " - " .. peripheral.getType(name))
+local function digestblock(m, C)
+    local a, b, c, d = upack(C)
+    for j = 0, 63 do
+        local f, g, r = 0, j, brshift(j, 4)
+        if r == 0 then
+            f = bor(band(b, c), band(bnot(b), d))
+        elseif r == 1 then
+            f = bor(band(d, b), band(bnot(d), c))
+            g = (5*j+1)%16
+        elseif r == 2 then
+            f = bxor(b, c, d)
+            g = (3*j+5)%16
+        elseif r == 3 then
+            f = bxor(c, bor(b, bnot(d)))
+            g = (7*j)%16
+        end
+        local dTemp = d
+        a, b, c, d = dTemp, (b+lrotate((a + f + K[j+1] + m[g+1])%mod32, s[bor(blshift(r, 2), band(j, 3))+1]))%mod32, b, c
     end
-    error("Please place computer next to a Create train station")
+    C[1] = (C[1] + a)%mod32
+    C[2] = (C[2] + b)%mod32
+    C[3] = (C[3] + c)%mod32
+    C[4] = (C[4] + d)%mod32
+    return C
 end
 
--- Set unique station ID
-local UNIQUE_STATION_ID = COMPUTER_ID .. ":" .. PERIPHERAL_NAME
+local md5_mt = {
+    __tostring = function(a) return string.char(unpack(a)) end,
+    __index = {
+        toHex = function(self, s) return ("%02x"):rep(#self):format(unpack(self)) end,
+        isEqual = function(self, t)
+            if type(t) ~= "table" then return false end
+            if #self ~= #t then return false end
+            local ret = 0
+            for i = 1, #self do
+                ret = bor(ret, bxor(self[i], t[i]))
+            end
+            return ret == 0
+        end
+    }
+}
+
+local function toBytes(t, n)
+    local b = {}
+    for i = 1, n do
+        b[(i-1)*4+1] = band(t[i], 0xFF)
+        b[(i-1)*4+2] = band(brshift(t[i], 8), 0xFF)
+        b[(i-1)*4+3] = band(brshift(t[i], 16), 0xFF)
+        b[(i-1)*4+4] = band(brshift(t[i], 24), 0xFF)
+    end
+    return setmetatable(b, md5_mt)
+end
+
+local function md5_digest(data)
+    data = data or ""
+    data = type(data) == "string" and {data:byte(1,-1)} or data
+
+    data = preprocess(data)
+    local C = {upack(H)}
+    for i = 1, #data do C = digestblock(data[i], C) end
+    return toBytes(C, 4)
+end
+
+-- Helper function to get MD5 hash as hex string
+local function getFileHash(content)
+    local hash = md5_digest(content)
+    return hash:toHex()
+end
 
 -- Find peripherals
 local monitor = peripheral.find("monitor")
@@ -59,31 +162,13 @@ local speaker = peripheral.find("speaker")
 local useMonitor = monitor ~= nil
 local useSpeaker = speaker ~= nil
 
--- Setup monitor if available
+-- Setup monitor
 if useMonitor then
     monitor.setTextScale(1)
     monitor.clear()
 end
 
--- Helper functions
-local function safeCall(func, ...)
-    local success, result = pcall(func, ...)
-    if success then
-        return result
-    else
-        return nil
-    end
-end
-
--- Simple debug logger
-local DEBUG = false  -- Set to true for debug output
-local function debug(msg)
-    if DEBUG then
-        print("[DEBUG] " .. msg)
-    end
-end
-
--- Sound functions
+-- Audio helper functions
 local function playTone(frequency, duration, volume)
     if not useSpeaker then return end
     
@@ -101,636 +186,598 @@ local function playTone(frequency, duration, volume)
     speaker.playAudio(buffer)
 end
 
-local function playTrainSound(soundType)
+local function playSound(soundType)
     if not useSpeaker then return end
     
-    if soundType == "arrival" then
-        -- Pleasant arrival melody (Westminster Quarters inspired)
-        local notes = {
-            {659, 0.4},  -- E5
-            {523, 0.4},  -- C5
-            {587, 0.4},  -- D5
-            {392, 0.8},  -- G4
-            nil,         -- pause
-            {392, 0.4},  -- G4
-            {587, 0.4},  -- D5
-            {659, 0.4},  -- E5
-            {523, 0.8},  -- C5
-        }
+    if soundType == "startup" then
+        -- Ascending boot sound
+        playTone(262, 0.1, 0.3)  -- C4
+        sleep(0.05)
+        playTone(330, 0.1, 0.3)  -- E4
+        sleep(0.05)
+        playTone(392, 0.2, 0.3)  -- G4
         
-        for i, note in ipairs(notes) do
-            if note then
-                playTone(note[1], note[2], 0.35)
-                sleep(note[2] + 0.05)
-            else
-                sleep(0.2)
+    elseif soundType == "checking" then
+        -- Quick beep
+        playTone(440, 0.05, 0.2)  -- A4
+        
+    elseif soundType == "update_found" then
+        -- Happy ascending melody
+        playTone(523, 0.1, 0.3)  -- C5
+        sleep(0.02)
+        playTone(659, 0.1, 0.3)  -- E5
+        sleep(0.02)
+        playTone(784, 0.2, 0.3)  -- G5
+        
+    elseif soundType == "success" then
+        -- Success fanfare
+        playTone(523, 0.1, 0.3)  -- C5
+        playTone(523, 0.1, 0.3)  -- C5
+        sleep(0.05)
+        playTone(784, 0.3, 0.4)  -- G5
+        
+    elseif soundType == "error" then
+        -- Sad descending tone
+        playTone(440, 0.2, 0.3)  -- A4
+        sleep(0.05)
+        playTone(349, 0.2, 0.3)  -- F4
+        sleep(0.05)
+        playTone(262, 0.3, 0.3)  -- C4
+        
+    elseif soundType == "select" then
+        -- Selection beep
+        playTone(600, 0.05, 0.2)
+    end
+end
+
+-- Monitor display helper
+local function monitorWrite(text, x, y, color)
+    if not useMonitor then return end
+    
+    if x and y then
+        monitor.setCursorPos(x, y)
+    end
+    
+    if monitor.isColor() and color then
+        monitor.setTextColor(color)
+    else
+        monitor.setTextColor(colors.white)
+    end
+    
+    monitor.write(text)
+    monitor.setTextColor(colors.white)
+end
+
+-- Clear monitor
+local function clearMonitor()
+    if not useMonitor then return end
+    monitor.clear()
+    monitor.setCursorPos(1, 1)
+end
+
+-- Display status on monitor
+local function displayMonitorStatus(status, details)
+    if not useMonitor then return end
+    
+    clearMonitor()
+    local monWidth, monHeight = monitor.getSize()
+    
+    -- Title
+    monitorWrite("GitHub Updater", math.floor((monWidth - 14) / 2) + 1, 1, colors.yellow)
+    
+    -- Status
+    monitorWrite(status, 1, 3, colors.cyan)
+    
+    -- Details
+    if details then
+        local y = 5
+        for i, detail in ipairs(details) do
+            if y < monHeight then
+                monitorWrite(detail.text, 1, y, detail.color or colors.white)
+                y = y + 1
+            end
+        end
+    end
+    
+    -- Footer
+    monitorWrite("Computer " .. os.getComputerID(), 1, monHeight, colors.gray)
+end
+
+-- GitHub raw content URL builder
+local function getGitHubURL(file)
+    return string.format(
+        "https://raw.githubusercontent.com/%s/%s/%s/%s",
+        GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH, file
+    )
+end
+
+-- Config management
+local function loadConfig()
+    if not fs.exists(CONFIG_FILE) then
+        return {}
+    end
+    
+    local file = fs.open(CONFIG_FILE, "r")
+    local content = file.readAll()
+    file.close()
+    
+    return textutils.unserialise(content) or {}
+end
+
+local function saveConfig(config)
+    local file = fs.open(CONFIG_FILE, "w")
+    file.write(textutils.serialise(config))
+    file.close()
+end
+
+-- Download and parse manifest
+local function downloadManifest()
+    local url = getGitHubURL(MANIFEST_URL)
+    local response = http.get(url)
+    
+    if not response then
+        return nil, "Failed to download manifest"
+    end
+    
+    local content = response.readAll()
+    response.close()
+    
+    local manifest = textutils.unserialiseJSON(content)
+    if not manifest or not manifest.scripts then
+        return nil, "Invalid manifest format"
+    end
+    
+    return manifest, nil
+end
+
+-- Script selection menu
+local function selectScript(manifest)
+    term.clear()
+    term.setCursorPos(1, 1)
+    
+    if term.isColor() then term.setTextColor(colors.yellow) end
+    print("=== Script Selection ===")
+    term.setTextColor(colors.white)
+    print("")
+    
+    -- Group by category
+    local categories = {}
+    for _, script in ipairs(manifest.scripts) do
+        local cat = script.category or "Other"
+        if not categories[cat] then
+            categories[cat] = {}
+        end
+        table.insert(categories[cat], script)
+    end
+    
+    -- Display options
+    local options = {}
+    local y = 3
+    
+    for category, scripts in pairs(categories) do
+        if term.isColor() then term.setTextColor(colors.cyan) end
+        print(category .. ":")
+        term.setTextColor(colors.white)
+        
+        for _, script in ipairs(scripts) do
+            table.insert(options, script)
+            print("  " .. #options .. ". " .. script.name)
+            if term.isColor() then term.setTextColor(colors.gray) end
+            print("     " .. script.description)
+            term.setTextColor(colors.white)
+        end
+        print("")
+    end
+    
+    -- Monitor display
+    if useMonitor then
+        displayMonitorStatus("Select Script", {
+            {text = "Check terminal", color = colors.yellow},
+            {text = "for options", color = colors.yellow}
+        })
+    end
+    
+    -- Get selection
+    print("")
+    term.write("Select script (1-" .. #options .. "): ")
+    
+    local selection = nil
+    while not selection do
+        local input = read()
+        local num = tonumber(input)
+        
+        if num and num >= 1 and num <= #options then
+            selection = options[num]
+            playSound("select")
+        else
+            if term.isColor() then term.setTextColor(colors.red) end
+            print("Invalid selection. Try again: ")
+            term.setTextColor(colors.white)
+            term.write("Select script (1-" .. #options .. "): ")
+        end
+    end
+    
+    return selection
+end
+
+-- Read local file hash
+local function getLocalHash(filename)
+    if not fs.exists(filename) then
+        return nil
+    end
+    
+    local file = fs.open(filename, "r")
+    if not file then
+        return nil
+    end
+    
+    local content = file.readAll()
+    file.close()
+    
+    return getFileHash(content)
+end
+
+-- Download file from GitHub
+local function downloadFile(github_file)
+    local url = getGitHubURL(github_file)
+    
+    local response = http.get(url)
+    
+    if not response then
+        return nil, "Failed to download from " .. url
+    end
+    
+    local content = response.readAll()
+    response.close()
+    
+    if not content or content == "" then
+        return nil, "Empty response from GitHub"
+    end
+    
+    return content, nil
+end
+
+-- Update a single file
+local function updateFile(github_file, local_name, description)
+    local localHash = getLocalHash(local_name)
+    
+    -- Download from GitHub
+    local content, err = downloadFile(github_file)
+    if not content then
+        return false, err
+    end
+    
+    local remoteHash = getFileHash(content)
+    
+    -- Debug: Show hashes (only if terminal is available)
+    if term.current() then
+        local _, y = term.getCursorPos()
+        if y < 20 then  -- Only print if there's room on screen
+            print("  Local:  " .. (localHash or "none"))
+            print("  Remote: " .. remoteHash)
+        end
+    end
+    
+    -- Check if update needed
+    if localHash == remoteHash then
+        return false, "Already up to date"
+    end
+    
+    -- Backup existing file
+    if fs.exists(local_name) then
+        local backupName = local_name .. ".backup"
+        if fs.exists(backupName) then
+            fs.delete(backupName)
+        end
+        fs.copy(local_name, backupName)
+    end
+    
+    -- Write new file
+    local file = fs.open(local_name, "w")
+    if not file then
+        return false, "Cannot write file"
+    end
+    
+    file.write(content)
+    file.close()
+    
+    return true, string.format("Updated (%s -> %s)", 
+        localHash and localHash:sub(1, 8) or "new", 
+        remoteHash:sub(1, 8))
+end
+
+-- Quick update check
+local function quickUpdateCheck(selectedScript, checkOnly)
+    local updated = false
+    local updaterUpdated = false
+    local details = {}
+    
+    -- Don't play sound if check-only mode
+    if not checkOnly then
+        playSound("checking")
+    end
+    
+    -- Show initial status
+    if not checkOnly then
+        term.clear()
+        term.setCursorPos(1, 1)
+        if term.isColor() then term.setTextColor(colors.yellow) end
+        print("GitHub Update Check")
+        print("Selected: " .. selectedScript.name)
+        print("")
+        term.setTextColor(colors.white)
+        
+        displayMonitorStatus("Checking updates...", {
+            {text = selectedScript.name, color = colors.cyan},
+            {text = "Repo: " .. GITHUB_REPO, color = colors.lightGray}
+        })
+    end
+    
+    -- Files to check
+    local filesToCheck = {
+        {
+            github = "updater.lua",
+            local_name = "startup.lua",
+            description = "Updater"
+        },
+        {
+            github = selectedScript.file,
+            local_name = selectedScript.local_name,
+            description = selectedScript.name
+        }
+    }
+    
+    -- Check each file
+    for i, fileInfo in ipairs(filesToCheck) do
+        if not checkOnly then
+            term.setCursorPos(1, 3 + (i * 3))
+            term.write(fileInfo.description .. ": ")
+        end
+        
+        local success, message
+        
+        if checkOnly then
+            -- In check-only mode, just check if update is needed without installing
+            success, message = checkFileNeedsUpdate(fileInfo.github, fileInfo.local_name, checkOnly)
+        else
+            -- In normal mode, actually update the file
+            success, message = updateFile(fileInfo.github, fileInfo.local_name, fileInfo.description, checkOnly)
+        end
+        
+        if success then
+            if not checkOnly then
+                if term.isColor() then term.setTextColor(colors.green) end
+                print("Updated!")
+                term.setTextColor(colors.white)
+            end
+            updated = true
+            
+            -- Check if updater itself was updated
+            if fileInfo.local_name == "startup.lua" then
+                updaterUpdated = true
+            end
+        else
+            if not checkOnly then
+                if message == "Already up to date" then
+                    if term.isColor() then term.setTextColor(colors.gray) end
+                    print("Current")
+                else
+                    if term.isColor() then term.setTextColor(colors.red) end
+                    print("Failed: " .. message)
+                end
+                term.setTextColor(colors.white)
             end
         end
         
-    elseif soundType == "departure" then
-        -- Classic train departure whistle sequence
-        -- Two long blasts, one short, one long
-        playTone(440, 0.8, 0.4)  -- A4 long
-        sleep(0.2)
-        playTone(440, 0.8, 0.4)  -- A4 long
-        sleep(0.2)
-        playTone(440, 0.3, 0.4)  -- A4 short
-        sleep(0.1)
-        playTone(440, 1.0, 0.4)  -- A4 long
-        
-    elseif soundType == "imminent" then
-        -- Attention-getting warning melody
-        for i = 1, 3 do
-            playTone(523, 0.2, 0.3)  -- C5
-            playTone(659, 0.2, 0.3)  -- E5
-            sleep(0.1)
-        end
-        -- Final emphasis
-        playTone(784, 0.6, 0.4)  -- G5
-        
-    elseif soundType == "update_check" then
-        -- Quiet update check beep
-        playTone(800, 0.05, 0.1)
-        
-    elseif soundType == "update_found" then
-        -- Cheerful update notification melody
-        local notes = {
-            {523, 0.2},  -- C5
-            {587, 0.2},  -- D5
-            {659, 0.2},  -- E5
-            {784, 0.2},  -- G5
-            {659, 0.2},  -- E5
-            {784, 0.4},  -- G5
-            {1047, 0.6}, -- C6
-        }
-        
-        for _, note in ipairs(notes) do
-            playTone(note[1], note[2], 0.25)
-            sleep(note[2])
-        end
-        
-    elseif soundType == "startup" then
-        -- Startup fanfare
-        local notes = {
-            {262, 0.15}, -- C4
-            {330, 0.15}, -- E4
-            {392, 0.15}, -- G4
-            {523, 0.15}, -- C5
-            {659, 0.15}, -- E5
-            {784, 0.15}, -- G5
-            {1047, 0.4}, -- C6
-        }
-        
-        for _, note in ipairs(notes) do
-            playTone(note[1], note[2], 0.3)
-            sleep(note[2] * 0.8)
-        end
+        table.insert(details, {
+            text = fileInfo.description .. ": " .. (success and "Updated!" or "Current"),
+            color = success and colors.green or colors.gray
+        })
     end
+    
+    -- Update monitor with results
+    if not checkOnly then
+        local statusText = updated and "Updates installed!" or "All files current"
+        
+        if updated then
+            playSound("update_found")
+            table.insert(details, {text = "", color = colors.white})
+            table.insert(details, {text = "Restarting soon...", color = colors.yellow})
+        end
+        
+        displayMonitorStatus(statusText, details)
+    end
+    
+    return updated, updaterUpdated
 end
 
--- Helper function to write to both terminal and monitor
-local function output(text, x, y, color)
-    -- Terminal output
-    if x and y then
-        term.setCursorPos(x, y)
-    end
-    if color and term.isColor() then
-        term.setTextColor(color)
-    end
-    print(text)
-    term.setTextColor(colors.white)
+-- Main execution
+local function main(...)
+    local args = {...}
+    local checkOnly = args[1] == "check"
     
-    -- Monitor output (only if not in passenger mode)
-    if useMonitor and not PASSENGER_DISPLAY then
-        if x and y then
-            monitor.setCursorPos(x, y)
+    -- Play startup sound (unless in check-only mode)
+    if not checkOnly then
+        playSound("startup")
+    end
+    
+    -- Check for selection key (skip in check-only mode)
+    local changeSelection = false
+    if not checkOnly then
+        print("Press S within 2 seconds to change script selection...")
+        local timer = os.startTimer(2)
+        
+        while true do
+            local event, param = os.pullEvent()
+            if event == "timer" and param == timer then
+                break
+            elseif event == "key" and (param == keys.s or param == keys.S) then
+                changeSelection = true
+                break
+            end
         end
-        if color and monitor.isColor() then
-            monitor.setTextColor(color)
+    end
+    
+    -- Load config
+    local config = loadConfig()
+    
+    -- Download manifest
+    if not checkOnly then
+        print("\nDownloading manifest...")
+    end
+    local manifest, err = downloadManifest()
+    if not manifest then
+        if not checkOnly then
+            playSound("error")
+            print("Failed to download manifest: " .. err)
+            sleep(5)
+            os.reboot()
         end
-        monitor.write(text)
-        monitor.setTextColor(colors.white)
-    end
-end
-
--- Function to clear both displays
-local function clearDisplays()
-    term.clear()
-    term.setCursorPos(1, 1)
-    if useMonitor then
-        monitor.clear()
-        monitor.setCursorPos(1, 1)
-    end
-end
-
--- Get the actual station name (not the peripheral name)
-local actualStationName = safeCall(station.getStationName) or "Unknown Station"
-
--- Prepare HTTP headers
-local headers = {
-    ["Content-Type"] = "application/json"
-}
-
--- Train status history for passenger display
-local trainHistory = {}
-local maxHistory = 10
-
--- Sound settings
-local soundEnabled = true
-local lastSoundTime = 0
-local SOUND_COOLDOWN = 10  -- Minimum seconds between sounds (increased for longer jingles)
-
--- Function to trigger update check
-local function triggerUpdateCheck()
-    -- Run the updater script in check-only mode
-    playTrainSound("update_check")
-    
-    -- shell.run returns true/false for success, not the script's return value
-    -- We need to use os.run instead to capture the actual return value
-    local env = {}
-    setmetatable(env, {__index = _G})
-    
-    local fn, err = loadfile(STARTUP_SCRIPT, nil, env)
-    if not fn then
         return false
     end
     
-    -- Run the updater with "check" argument
-    local ok, hasUpdate = pcall(fn, "check")
+    -- Select script if needed
+    local selectedScript = nil
     
-    if ok and hasUpdate == true then
-        playTrainSound("update_found")
-        return true
+    if not checkOnly and (changeSelection or not config.selected_script) then
+        selectedScript = selectScript(manifest)
+        config.selected_script = selectedScript.id
+        saveConfig(config)
+        print("\nSelection saved: " .. selectedScript.name)
+        sleep(1)
+    else
+        -- Find selected script in manifest
+        for _, script in ipairs(manifest.scripts) do
+            if script.id == config.selected_script then
+                selectedScript = script
+                break
+            end
+        end
+        
+        -- Fallback to default if not found
+        if not selectedScript then
+            for _, script in ipairs(manifest.scripts) do
+                if script.id == manifest.default then
+                    selectedScript = script
+                    break
+                end
+            end
+        end
+        
+        -- Last resort - first script
+        if not selectedScript then
+            selectedScript = manifest.scripts[1]
+        end
     end
+    
+    -- Perform update check
+    local updated, updaterUpdated = quickUpdateCheck(selectedScript, checkOnly)
+    
+    -- If in check-only mode, return the update status
+    if checkOnly then
+        return updated
+    end
+    
+    -- If updater was updated, restart immediately
+    if updaterUpdated then
+        print("\nUpdater updated! Restarting...")
+        sleep(2)
+        os.reboot()
+        return true  -- This won't execute due to reboot, but good practice
+    end
+    
+    -- Brief pause if updates were installed
+    if updated then
+        sleep(2)
+    else
+        sleep(0.5)
+    end
+    
+    -- Check if main script exists
+    if not fs.exists(selectedScript.local_name) then
+        playSound("error")
+        term.clear()
+        term.setCursorPos(1, 1)
+        if term.isColor() then term.setTextColor(colors.red) end
+        print("ERROR: Script not found!")
+        print("Failed to download " .. selectedScript.local_name)
+        term.setTextColor(colors.white)
+        print("\nRetrying in 10 seconds...")
+        
+        displayMonitorStatus("Error!", {
+            {text = "Script not found", color = colors.red},
+            {text = selectedScript.local_name, color = colors.orange}
+        })
+        
+        sleep(10)
+        os.reboot()
+        return
+    end
+    
+    -- Clear screen and run main script
+    term.clear()
+    term.setCursorPos(1, 1)
+    
+    -- Update monitor to show we're starting
+    displayMonitorStatus("Starting...", {
+        {text = selectedScript.name, color = colors.green}
+    })
+    
+    -- Play success sound before launching
+    playSound("success")
+    sleep(0.5)
+    clearMonitor()
+    
+    -- Run with error handling
+    local ok, err = pcall(function()
+        shell.run(selectedScript.local_name)
+    end)
+    
+    if not ok then
+        -- Script crashed
+        playSound("error")
+        term.clear()
+        term.setCursorPos(1, 1)
+        if term.isColor() then term.setTextColor(colors.red) end
+        print("ERROR: Script crashed!")
+        term.setTextColor(colors.white)
+        print(err)
+        print("\nRebooting in 10 seconds...")
+        
+        displayMonitorStatus("Crashed!", {
+            {text = "Script error", color = colors.red},
+            {text = selectedScript.name, color = colors.orange}
+        })
+        
+        sleep(10)
+        os.reboot()
+    end
+    
+    -- Normal execution completed
     return false
 end
 
--- Function to add to history
-local function addToHistory(event, trainName, time)
-    table.insert(trainHistory, 1, {
-        event = event,
-        train = trainName,
-        time = time
-    })
-    -- Keep only recent history
-    while #trainHistory > maxHistory do
-        table.remove(trainHistory)
-    end
-end
-
--- Function to gather station data
-local function getStationData()
-    local data = {
-        station_id = UNIQUE_STATION_ID,
-        station_name = actualStationName,
-        computer_id = COMPUTER_ID,
-        peripheral_name = PERIPHERAL_NAME,
-        assembly_mode = safeCall(station.isInAssemblyMode) or false,
-        train_present = safeCall(station.isTrainPresent) or false,
-        train_imminent = safeCall(station.isTrainImminent) or false,
-        train_enroute = safeCall(station.isTrainEnroute) or false,
-    }
+-- Emergency error handler and return value handling
+local ok, result = pcall(main, ...)
+if not ok then
+    playSound("error")
+    if term.isColor() then term.setTextColor(colors.red) end
+    print("CRITICAL ERROR in updater:")
+    term.setTextColor(colors.white)
+    print(result)  -- 'result' contains the error message when pcall fails
+    print("\nRebooting in 10 seconds...")
     
-    -- If train is present, get additional info
-    if data.train_present then
-        data.train_name = safeCall(station.getTrainName)
-        data.has_schedule = safeCall(station.hasSchedule) or false
-        
-        if data.has_schedule then
-            data.schedule = safeCall(station.getSchedule)
-        end
+    if useMonitor then
+        displayMonitorStatus("CRITICAL ERROR", {
+            {text = "Updater crashed!", color = colors.red}
+        })
     end
     
-    return data
-end
-
--- Function to send data to server
-local function sendUpdate(data)
-    local json = textutils.serialiseJSON(data)
-    
-    -- Debug: log what we're sending (first 200 chars)
-    debug("Sending JSON: " .. string.sub(json, 1, 200) .. (string.len(json) > 200 and "..." or ""))
-    
-    local response = http.post(
-        SERVER_URL .. "/station/update",
-        json,
-        headers
-    )
-    
-    if response then
-        local responseData = response.readAll()
-        response.close()
-        return true, responseData
-    else
-        -- Check if URL is allowed
-        local ok, err = http.checkURL(SERVER_URL)
-        if not ok then
-            return false, "URL check failed: " .. (err or "unknown error")
-        end
-        return false, "Failed to connect to server"
-    end
-end
-
--- Function to display passenger-friendly monitor
-local function displayPassengerMonitor(data)
-    if not useMonitor or not PASSENGER_DISPLAY then return end
-    
-    monitor.clear()
-    local monWidth, monHeight = monitor.getSize()
-    
-    -- Header with station name
-    monitor.setCursorPos(1, 1)
-    monitor.setTextColor(colors.yellow)
-    local header = "=== " .. actualStationName .. " ==="
-    local headerX = math.floor((monWidth - #header) / 2) + 1
-    monitor.setCursorPos(headerX, 1)
-    monitor.write(header)
-    
-    -- Current status
-    monitor.setCursorPos(1, 3)
-    monitor.setTextColor(colors.white)
-    monitor.write("Status: ")
-    
-    local currentY = 3
-    
-    if data.train_present then
-        monitor.setTextColor(colors.green)
-        monitor.write("TRAIN AT PLATFORM")
-        
-        if data.train_name then
-            monitor.setCursorPos(1, 4)
-            monitor.setTextColor(colors.white)
-            monitor.write("Train: ")
-            monitor.setTextColor(colors.lime)
-            
-            -- Handle Unicode in train names
-            local displayName = data.train_name
-            if string.find(displayName, "?") then
-                displayName = displayName .. " *"
-            end
-            monitor.write(displayName)
-            currentY = 5
-        end
-    elseif data.train_imminent then
-        monitor.setTextColor(colors.yellow)
-        monitor.write("TRAIN ARRIVING")
-        monitor.setCursorPos(1, 4)
-        monitor.setTextColor(colors.gray)
-        monitor.write("Please stand back")
-        currentY = 5
-    elseif data.train_enroute then
-        monitor.setTextColor(colors.orange)
-        monitor.write("TRAIN ENROUTE")
-        currentY = 4
-    else
-        monitor.setTextColor(colors.lightGray)
-        monitor.write("NO TRAINS")
-        currentY = 4
-    end
-    
-    -- Recent activity
-    if #trainHistory > 0 then
-        currentY = currentY + 2
-        monitor.setCursorPos(1, currentY)
-        monitor.setTextColor(colors.cyan)
-        monitor.write("Recent Trains:")
-        currentY = currentY + 1
-        
-        monitor.setTextColor(colors.white)
-        for i, entry in ipairs(trainHistory) do
-            if currentY < monHeight - 2 then
-                monitor.setCursorPos(1, currentY)
-                
-                -- Time
-                monitor.setTextColor(colors.gray)
-                monitor.write(textutils.formatTime(entry.time, true) .. " ")
-                
-                -- Event
-                if entry.event == "arrived" then
-                    monitor.setTextColor(colors.green)
-                    monitor.write("ARR ")
-                else
-                    monitor.setTextColor(colors.red)
-                    monitor.write("DEP ")
-                end
-                
-                -- Train name (truncate if needed)
-                monitor.setTextColor(colors.white)
-                local trainDisplay = entry.train or "Unknown"
-                if #trainDisplay > monWidth - 10 then
-                    trainDisplay = string.sub(trainDisplay, 1, monWidth - 13) .. "..."
-                end
-                monitor.write(trainDisplay)
-                
-                currentY = currentY + 1
-            end
-        end
-    end
-    
-    -- Sound status indicator
-    monitor.setCursorPos(1, monHeight - 1)
-    monitor.setTextColor(colors.gray)
-    monitor.write("Sound: ")
-    monitor.setTextColor(soundEnabled and colors.green or colors.red)
-    monitor.write(soundEnabled and "ON" or "OFF")
-    
-    -- Footer with time
-    monitor.setCursorPos(1, monHeight)
-    monitor.setTextColor(colors.gray)
-    monitor.write(textutils.formatTime(os.time(), true))
-    
-    -- Unicode indicator
-    if data.train_name and string.find(data.train_name, "?") then
-        local note = "* Unicode"
-        monitor.setCursorPos(monWidth - #note + 1, monHeight)
-        monitor.write(note)
-    end
-end
-
--- Function to display debug monitor status
-local function displayDebugMonitor(data, serverStatus, lastUpdate)
-    if not useMonitor or PASSENGER_DISPLAY then return end
-    
-    monitor.clear()
-    monitor.setCursorPos(1, 1)
-    
-    -- Title
-    monitor.setTextColor(colors.yellow)
-    monitor.write("=== TRAIN STATION DEBUG ===")
-    
-    -- Station info
-    monitor.setCursorPos(1, 3)
-    monitor.setTextColor(colors.white)
-    monitor.write("Station: ")
-    monitor.setTextColor(colors.cyan)
-    monitor.write(data.station_name)
-    
-    -- Status
-    monitor.setCursorPos(1, 4)
-    monitor.setTextColor(colors.white)
-    monitor.write("Status: ")
-    
-    local status = "IDLE"
-    local statusColor = colors.lightGray
-    
-    if data.assembly_mode then
-        status = "ASSEMBLY"
-        statusColor = colors.purple
-    elseif data.train_present then
-        status = "OCCUPIED"
-        statusColor = colors.green
-    elseif data.train_imminent then
-        status = "ARRIVING"
-        statusColor = colors.yellow
-    elseif data.train_enroute then
-        status = "ENROUTE"
-        statusColor = colors.orange
-    end
-    
-    monitor.setTextColor(statusColor)
-    monitor.write(status)
-    
-    -- Sound and speaker status
-    monitor.setCursorPos(1, 5)
-    monitor.setTextColor(colors.white)
-    monitor.write("Speaker: ")
-    monitor.setTextColor(useSpeaker and colors.green or colors.red)
-    monitor.write(useSpeaker and "Connected" or "Not found")
-    
-    -- Server status
-    local monWidth, monHeight = monitor.getSize()
-    monitor.setCursorPos(1, monHeight - 1)
-    monitor.setTextColor(colors.white)
-    monitor.write("Server: ")
-    
-    if serverStatus == "Connected" then
-        monitor.setTextColor(colors.green)
-    else
-        monitor.setTextColor(colors.red)
-    end
-    monitor.write(serverStatus)
-    
-    -- Debug info
-    monitor.setCursorPos(1, monHeight)
-    monitor.setTextColor(colors.gray)
-    monitor.write("C" .. COMPUTER_ID .. ":" .. PERIPHERAL_NAME)
-end
-
--- Function to display status in terminal
-local function displayTerminalStatus(data, serverStatus, nextUpdateCheck)
-    clearDisplays()
-    
-    output("TRAIN STATION NETWORK CLIENT", 1, 1, colors.yellow)
-    output("Station: " .. data.station_name, 1, 2)
-    output("Computer ID: " .. COMPUTER_ID, 1, 3, colors.lightGray)
-    output("Peripheral: " .. PERIPHERAL_NAME, 1, 4, colors.lightGray)
-    output("Display Mode: " .. (PASSENGER_DISPLAY and "Passenger" or "Debug"), 1, 5, colors.cyan)
-    output("Speaker: " .. (useSpeaker and "Connected" or "Not found"), 1, 6, useSpeaker and colors.green or colors.red)
-    output("Sound: " .. (soundEnabled and "Enabled" or "Disabled"), 1, 7, soundEnabled and colors.green or colors.red)
-    
-    -- Next update check info
-    if nextUpdateCheck then
-        local timeUntil = math.floor(nextUpdateCheck - os.clock())
-        output("Next update check in: " .. timeUntil .. "s", 1, 8, colors.gray)
-    end
-    
-    output(string.rep("-", 40), 1, 9)
-    
-    -- Status
-    local status = "IDLE"
-    if data.assembly_mode then
-        status = "ASSEMBLY MODE"
-    elseif data.train_present then
-        status = "TRAIN PRESENT: " .. (data.train_name or "Unknown")
-    elseif data.train_imminent then
-        status = "TRAIN ARRIVING"
-    elseif data.train_enroute then
-        status = "TRAIN ENROUTE"
-    end
-    
-    output("Status: " .. status, 1, 11, colors.green)
-    
-    -- Server connection
-    output("Server: " .. serverStatus, 1, 13, serverStatus == "Connected" and colors.green or colors.red)
-    
-    -- Instructions
-    output("", 1, 15)
-    output("Controls:", 1, 15, colors.yellow)
-    output("Q: Quit | M: Toggle monitor | S: Network status", 1, 16, colors.gray)
-    output("U: Update now | R: Restart | T: Toggle sound", 1, 17, colors.gray)
-end
-
--- Function to get network status from server
-local function getNetworkStatus()
-    local response = http.get(SERVER_URL .. "/network/status")
-    
-    if response then
-        local data = textutils.unserialiseJSON(response.readAll())
-        response.close()
-        
-        clearDisplays()
-        output("NETWORK STATUS", 1, 1, colors.yellow)
-        output(string.rep("-", 40), 1, 2)
-        output("Active Stations: " .. data.active_stations .. "/" .. data.total_stations, 1, 3)
-        output("Total Trains: " .. data.total_trains, 1, 4)
-        output("Trains in Motion: " .. data.trains_in_motion, 1, 5)
-        output("Occupied Stations: " .. data.occupied_stations, 1, 6)
-        output("Recent Movements: " .. data.recent_movements, 1, 7)
-        output("", 1, 9)
-        output("Press any key to continue...", 1, 9, colors.gray)
-        os.pullEvent("key")
-    else
-        output("Failed to get network status", 1, 1, colors.red)
-        sleep(2)
-    end
-end
-
--- Main loop
-output("Starting Train Station Network Client...", 1, 1, colors.yellow)
-output("Computer ID: " .. COMPUTER_ID, 1, 2, colors.lightGray)
-output("Station: " .. actualStationName, 1, 3, colors.cyan)
-output("Peripheral: " .. PERIPHERAL_NAME .. " (" .. peripheral.getType(PERIPHERAL_NAME) .. ")", 1, 4)
-output("Monitor: " .. (useMonitor and "Connected" or "Not found"), 1, 5, useMonitor and colors.green or colors.red)
-output("Speaker: " .. (useSpeaker and "Connected" or "Not found"), 1, 6, useSpeaker and colors.green or colors.red)
-output("Display Mode: " .. (PASSENGER_DISPLAY and "Passenger" or "Debug"), 1, 7, colors.cyan)
-output("GitHub Updates: Enabled", 1, 8, colors.green)
-
--- Play startup sound
-if useSpeaker then
-    playTrainSound("startup")
-end
-
-sleep(3)
-
-local lastData = {}
-local updateTimer = os.startTimer(0)
-local lastUpdateTime = os.time()
-local lastUpdateCheck = os.clock()
-local nextUpdateCheck = os.clock() + UPDATE_CHECK_INTERVAL
-
-while true do
-    local event, param = os.pullEvent()
-    
-    if event == "timer" and param == updateTimer then
-        -- Gather and send data
-        local data = getStationData()
-        local success, response = sendUpdate(data)
-        
-        local serverStatus = success and "Connected" or "Error"
-        if not success then
-            -- Show more detailed error
-            print("Server error: " .. response)
-        end
-        
-        -- Check for significant changes for passenger display and sounds
-        if PASSENGER_DISPLAY then
-            local currentTime = os.clock()
-            
-            -- Train arrival
-            if not lastData.train_present and data.train_present then
-                addToHistory("arrived", data.train_name or "Unknown", os.time())
-                if soundEnabled and (currentTime - lastSoundTime > SOUND_COOLDOWN) then
-                    playTrainSound("arrival")
-                    lastSoundTime = currentTime
-                end
-                
-            -- Train departure
-            elseif lastData.train_present and not data.train_present then
-                if lastData.train_name then
-                    addToHistory("departed", lastData.train_name, os.time())
-                end
-                if soundEnabled and (currentTime - lastSoundTime > SOUND_COOLDOWN) then
-                    playTrainSound("departure")
-                    lastSoundTime = currentTime
-                end
-                
-            -- Train imminent
-            elseif not lastData.train_imminent and data.train_imminent then
-                if soundEnabled and (currentTime - lastSoundTime > SOUND_COOLDOWN) then
-                    playTrainSound("imminent")
-                    lastSoundTime = currentTime
-                end
-            end
-        end
-        
-        -- Check for updates periodically
-        if os.clock() >= nextUpdateCheck then
-            local hasUpdate = triggerUpdateCheck()
-            nextUpdateCheck = os.clock() + UPDATE_CHECK_INTERVAL
-            
-            if hasUpdate then
-                -- Schedule restart in 30 seconds
-                output("Update available! Restarting in 30 seconds...", 1, 1, colors.yellow)
-                os.startTimer(30)
-            end
-        end
-        
-        -- Display status
-        displayTerminalStatus(data, serverStatus, nextUpdateCheck)
-        
-        if PASSENGER_DISPLAY then
-            displayPassengerMonitor(data)
-        else
-            displayDebugMonitor(data, serverStatus, lastUpdateTime)
-        end
-        
-        lastData = data
-        lastUpdateTime = os.time()
-        updateTimer = os.startTimer(UPDATE_INTERVAL)
-        
-    elseif event == "key" then
-        if param == keys.q then
-            clearDisplays()
-            output("Client stopped.", 1, 1)
-            break
-            
-        elseif param == keys.m then
-            -- Toggle monitor mode
-            PASSENGER_DISPLAY = not PASSENGER_DISPLAY
-            output("Switched to " .. (PASSENGER_DISPLAY and "Passenger" or "Debug") .. " display", 1, 1, colors.yellow)
-            sleep(1)
-            
-        elseif param == keys.s then
-            getNetworkStatus()
-            
-        elseif param == keys.t then
-            -- Toggle sound
-            soundEnabled = not soundEnabled
-            output("Sound " .. (soundEnabled and "enabled" or "disabled"), 1, 1, colors.yellow)
-            if soundEnabled and useSpeaker then
-                -- Play a test melody when enabling sound
-                local testNotes = {
-                    {523, 0.1},  -- C5
-                    {659, 0.1},  -- E5
-                    {784, 0.1},  -- G5
-                    {1047, 0.2}, -- C6
-                }
-                for _, note in ipairs(testNotes) do
-                    playTone(note[1], note[2], 0.25)
-                    sleep(note[2])
-                end
-            end
-            sleep(1)
-            
-        elseif param == keys.u then
-            -- Manual update check
-            output("Checking for GitHub updates...", 1, 1, colors.yellow)
-            local hasUpdate = triggerUpdateCheck()
-            if hasUpdate then
-                output("Update found! Restarting in 5 seconds...", 1, 2, colors.green)
-                sleep(5)
-                os.reboot()
-            else
-                output("No updates available", 1, 2, colors.gray)
-                sleep(2)
-            end
-            
-        elseif param == keys.r then
-            -- Manual restart
-            clearDisplays()
-            output("Restarting...", 1, 1, colors.orange)
-            sleep(1)
-            os.reboot()
-        end
+    sleep(10)
+    os.reboot()
+else
+    -- If we were in check-only mode, return the result
+    if ({...})[1] == "check" then
+        return result
     end
 end
