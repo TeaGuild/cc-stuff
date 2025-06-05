@@ -92,17 +92,17 @@
       "name_en": "Phystech",
       "lines": ["P"],
       "platforms": {
-        "2:left": {
-          "line": "P",
-          "direction": "west",
-          "next_station": null,
-          "platform_name": "West Terminal"
-        },
         "2:Create_Station_2": {
           "line": "P",
-          "direction": "east",
+          "direction": "north",
           "next_station": "old_vanyuki",
-          "platform_name": "East Platform"
+          "platform_name": "Platform 2"
+        },
+        "2:left": {
+          "line": "P",
+          "direction": "south",
+          "next_station": null,
+          "platform_name": "Platform 1"
         }
       },
       "transfer": false
