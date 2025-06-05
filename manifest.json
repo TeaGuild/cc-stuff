@@ -15,6 +15,19 @@
       ]
     },
     {
+      "id": "train_station",
+      "name": "Multiplatform Train Station Monitor",
+      "description": "Monitor and display Create mod multiplatform train station status",
+      "file": "mpt_station.lua",
+      "local_name": "mpt_station.lua",
+      "category": "Create Mod",
+      "requirements": [
+        "Create train station peripheral",
+        "Optional: Monitor for display",
+        "Optional: Speaker for audio"
+      ]
+    },
+    {
       "id": "depot_station",
       "name": "Depot Station Controller",
       "description": "Minimal depot controller for train assembly/disassembly",
