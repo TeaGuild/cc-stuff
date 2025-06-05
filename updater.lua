@@ -1,25 +1,13 @@
--- GitHub Auto-Updater for ComputerCraft with MD5
--- Self-updating startup script that manages multiple files from GitHub
--- Uses MD5 hash comparison for reliable change detection
+-- GitHub Auto-Updater for ComputerCraft with Manifest Support
+-- Self-updating startup script that manages multiple scripts from GitHub
+-- Uses MD5 hash comparison and manifest-based script selection
 
 -- Configuration
 local GITHUB_USER = "TeaGuild"
 local GITHUB_REPO = "cc-stuff"
 local GITHUB_BRANCH = "master"
-
--- Files to manage (updater first so it can self-update)
-local FILES = {
-    {
-        github = "updater.lua",
-        local_name = "startup.lua",
-        description = "Auto-updater"
-    },
-    {
-        github = "payload.lua", 
-        local_name = "train_station.lua",
-        description = "Train station monitor"
-    }
-}
+local CONFIG_FILE = ".updater_config"
+local MANIFEST_URL = "manifest.json"
 
 -- MD5 implementation by Anavrins
 local mod32 = 2^32
@@ -235,6 +223,10 @@ local function playSound(soundType)
         playTone(349, 0.2, 0.3)  -- F4
         sleep(0.05)
         playTone(262, 0.3, 0.3)  -- C4
+        
+    elseif soundType == "select" then
+        -- Selection beep
+        playTone(600, 0.05, 0.2)
     end
 end
 
@@ -299,6 +291,115 @@ local function getGitHubURL(file)
     )
 end
 
+-- Config management
+local function loadConfig()
+    if not fs.exists(CONFIG_FILE) then
+        return {}
+    end
+    
+    local file = fs.open(CONFIG_FILE, "r")
+    local content = file.readAll()
+    file.close()
+    
+    return textutils.unserialise(content) or {}
+end
+
+local function saveConfig(config)
+    local file = fs.open(CONFIG_FILE, "w")
+    file.write(textutils.serialise(config))
+    file.close()
+end
+
+-- Download and parse manifest
+local function downloadManifest()
+    local url = getGitHubURL(MANIFEST_URL)
+    local response = http.get(url)
+    
+    if not response then
+        return nil, "Failed to download manifest"
+    end
+    
+    local content = response.readAll()
+    response.close()
+    
+    local manifest = textutils.unserialiseJSON(content)
+    if not manifest or not manifest.scripts then
+        return nil, "Invalid manifest format"
+    end
+    
+    return manifest, nil
+end
+
+-- Script selection menu
+local function selectScript(manifest)
+    term.clear()
+    term.setCursorPos(1, 1)
+    
+    if term.isColor() then term.setTextColor(colors.yellow) end
+    print("=== Script Selection ===")
+    term.setTextColor(colors.white)
+    print("")
+    
+    -- Group by category
+    local categories = {}
+    for _, script in ipairs(manifest.scripts) do
+        local cat = script.category or "Other"
+        if not categories[cat] then
+            categories[cat] = {}
+        end
+        table.insert(categories[cat], script)
+    end
+    
+    -- Display options
+    local options = {}
+    local y = 3
+    
+    for category, scripts in pairs(categories) do
+        if term.isColor() then term.setTextColor(colors.cyan) end
+        print(category .. ":")
+        term.setTextColor(colors.white)
+        
+        for _, script in ipairs(scripts) do
+            table.insert(options, script)
+            print("  " .. #options .. ". " .. script.name)
+            if term.isColor() then term.setTextColor(colors.gray) end
+            print("     " .. script.description)
+            term.setTextColor(colors.white)
+        end
+        print("")
+    end
+    
+    -- Monitor display
+    if useMonitor then
+        displayMonitorStatus("Select Script", {
+            {text = "Check terminal", color = colors.yellow},
+            {text = "for options", color = colors.yellow}
+        })
+    end
+    
+    -- Get selection
+    print("")
+    term.write("Select script (1-" .. #options .. "): ")
+    
+    local selection = nil
+    while not selection do
+        local input = read()
+        local num = tonumber(input)
+        
+        if num and num >= 1 and num <= #options then
+            selection = options[num]
+            playSound("select")
+        else
+            if term.isColor() then term.setTextColor(colors.red) end
+            print("Invalid selection. Try again: ")
+            term.setTextColor(colors.white)
+            term.write("Select script (1-" .. #options .. "): ")
+        end
+    end
+    
+    return selection
+end
+
 -- Read local file hash
 local function getLocalHash(filename)
     if not fs.exists(filename) then
@@ -320,9 +421,6 @@ end
 local function downloadFile(github_file)
     local url = getGitHubURL(github_file)
     
-    -- Show download status
-    displayMonitorStatus("Downloading...", {{text = github_file, color = colors.yellow}})
-    
     local response = http.get(url)
     
     if not response then
@@ -336,20 +434,15 @@ local function downloadFile(github_file)
         return nil, "Empty response from GitHub"
     end
     
-    -- Basic validation - check if it looks like Lua code
-    if not (content:find("%-%-") or content:find("function") or content:find("local") or content:find("end")) then
-        return nil, "Content doesn't appear to be valid Lua code"
-    end
-    
     return content, nil
 end
 
 -- Update a single file
-local function updateFile(fileInfo)
-    local localHash = getLocalHash(fileInfo.local_name)
+local function updateFile(github_file, local_name, description)
+    local localHash = getLocalHash(local_name)
     
     -- Download from GitHub
-    local content, err = downloadFile(fileInfo.github)
+    local content, err = downloadFile(github_file)
     if not content then
         return false, err
     end
@@ -366,16 +459,16 @@ local function updateFile(fileInfo)
     end
     
     -- Backup existing file
-    if fs.exists(fileInfo.local_name) then
-        local backupName = fileInfo.local_name .. ".backup"
+    if fs.exists(local_name) then
+        local backupName = local_name .. ".backup"
         if fs.exists(backupName) then
             fs.delete(backupName)
         end
-        fs.copy(fileInfo.local_name, backupName)
+        fs.copy(local_name, backupName)
     end
     
     -- Write new file
-    local file = fs.open(fileInfo.local_name, "w")
+    local file = fs.open(local_name, "w")
     if not file then
         return false, "Cannot write file"
     end
@@ -388,8 +481,8 @@ local function updateFile(fileInfo)
         remoteHash:sub(1, 8))
 end
 
--- Quick update check with timeout
-local function quickUpdateCheck()
+-- Quick update check
+local function quickUpdateCheck(selectedScript)
     local updated = false
     local updaterUpdated = false
     local details = {}
@@ -402,68 +495,79 @@ local function quickUpdateCheck()
     term.setCursorPos(1, 1)
     if term.isColor() then term.setTextColor(colors.yellow) end
     print("GitHub Update Check")
-    print("Repository: " .. GITHUB_USER .. "/" .. GITHUB_REPO)
-    print("Branch: " .. GITHUB_BRANCH)
+    print("Selected: " .. selectedScript.name)
     print("")
     term.setTextColor(colors.white)
     
     displayMonitorStatus("Checking updates...", {
-        {text = "Repo: " .. GITHUB_REPO, color = colors.lightGray},
-        {text = "Branch: " .. GITHUB_BRANCH, color = colors.lightGray},
-        {text = "Speaker: " .. (useSpeaker and "Connected" or "Not found"), color = colors.lightGray}
+        {text = selectedScript.name, color = colors.cyan},
+        {text = "Repo: " .. GITHUB_REPO, color = colors.lightGray}
     })
     
-    -- Check each file
-    for i, fileInfo in ipairs(FILES) do
-        term.setCursorPos(1, 4 + (i * 3))
-        term.write(fileInfo.description .. ": ")
-        
-        local success, message = updateFile(fileInfo)
-        
-        local detailEntry = {text = fileInfo.description .. ": "}
-        
-        if success then
-            if term.isColor() then term.setTextColor(colors.green) end
-            print("Updated!")
-            detailEntry.text = detailEntry.text .. "Updated!"
-            detailEntry.color = colors.green
-            term.setTextColor(colors.white)
-            updated = true
-            
-            -- Check if updater itself was updated
-            if fileInfo.local_name == "startup.lua" then
-                updaterUpdated = true
-            end
+    -- Check updater itself
+    term.setCursorPos(1, 4)
+    term.write("Updater: ")
+    local success, message = updateFile("updater.lua", "startup.lua", "Updater")
+    
+    if success then
+        if term.isColor() then term.setTextColor(colors.green) end
+        print("Updated!")
+        term.setTextColor(colors.white)
+        updaterUpdated = true
+        updated = true
+    else
+        if message == "Already up to date" then
+            if term.isColor() then term.setTextColor(colors.gray) end
+            print("Current")
         else
-            if message == "Already up to date" then
-                if term.isColor() then term.setTextColor(colors.gray) end
-                print("Current")
-                detailEntry.text = detailEntry.text .. "Current"
-                detailEntry.color = colors.gray
-            else
-                if term.isColor() then term.setTextColor(colors.red) end
-                print("Failed")
-                print("  " .. message)
-                detailEntry.text = detailEntry.text .. "Failed"
-                detailEntry.color = colors.red
-            end
-            term.setTextColor(colors.white)
+            if term.isColor() then term.setTextColor(colors.red) end
+            print("Failed: " .. message)
         end
-        
-        table.insert(details, detailEntry)
+        term.setTextColor(colors.white)
     end
+    
+    -- Check selected script
+    term.setCursorPos(1, 7)
+    term.write(selectedScript.name .. ": ")
+    success, message = updateFile(selectedScript.file, selectedScript.local_name, selectedScript.name)
+    
+    local detailEntry = {text = selectedScript.name .. ": "}
+    
+    if success then
+        if term.isColor() then term.setTextColor(colors.green) end
+        print("Updated!")
+        detailEntry.text = detailEntry.text .. "Updated!"
+        detailEntry.color = colors.green
+        term.setTextColor(colors.white)
+        updated = true
+    else
+        if message == "Already up to date" then
+            if term.isColor() then term.setTextColor(colors.gray) end
+            print("Current")
+            detailEntry.text = detailEntry.text .. "Current"
+            detailEntry.color = colors.gray
+        else
+            if term.isColor() then term.setTextColor(colors.red) end
+            print("Failed")
+            print("  " .. message)
+            detailEntry.text = detailEntry.text .. "Failed"
+            detailEntry.color = colors.red
+        end
+        term.setTextColor(colors.white)
+    end
+    
+    table.insert(details, detailEntry)
     
     -- Update monitor with results
     local statusText = updated and "Updates installed!" or "All files current"
-    local statusDetails = details
     
     if updated then
         playSound("update_found")
-        table.insert(statusDetails, {text = "", color = colors.white})
-        table.insert(statusDetails, {text = "Restarting soon...", color = colors.yellow})
+        table.insert(details, {text = "", color = colors.white})
+        table.insert(details, {text = "Restarting soon...", color = colors.yellow})
     end
     
-    displayMonitorStatus(statusText, statusDetails)
+    displayMonitorStatus(statusText, details)
     
     return updated, updaterUpdated
 end
@@ -473,13 +577,75 @@ local function main()
     -- Play startup sound
     playSound("startup")
     
+    -- Check for selection key
+    print("Press S within 2 seconds to change script selection...")
+    local timer = os.startTimer(2)
+    local changeSelection = false
+    
+    while true do
+        local event, param = os.pullEvent()
+        if event == "timer" and param == timer then
+            break
+        elseif event == "key" and (param == keys.s or param == keys.S) then
+            changeSelection = true
+            break
+        end
+    end
+    
+    -- Load config
+    local config = loadConfig()
+    
+    -- Download manifest
+    print("\nDownloading manifest...")
+    local manifest, err = downloadManifest()
+    if not manifest then
+        playSound("error")
+        print("Failed to download manifest: " .. err)
+        sleep(5)
+        os.reboot()
+        return
+    end
+    
+    -- Select script if needed
+    local selectedScript = nil
+    
+    if changeSelection or not config.selected_script then
+        selectedScript = selectScript(manifest)
+        config.selected_script = selectedScript.id
+        saveConfig(config)
+        print("\nSelection saved: " .. selectedScript.name)
+        sleep(1)
+    else
+        -- Find selected script in manifest
+        for _, script in ipairs(manifest.scripts) do
+            if script.id == config.selected_script then
+                selectedScript = script
+                break
+            end
+        end
+        
+        -- Fallback to default if not found
+        if not selectedScript then
+            for _, script in ipairs(manifest.scripts) do
+                if script.id == manifest.default then
+                    selectedScript = script
+                    break
+                end
+            end
+        end
+        
+        -- Last resort - first script
+        if not selectedScript then
+            selectedScript = manifest.scripts[1]
+        end
+    end
+    
     -- Perform update check
-    local updated, updaterUpdated = quickUpdateCheck()
+    local updated, updaterUpdated = quickUpdateCheck(selectedScript)
     
     -- If updater was updated, restart immediately
     if updaterUpdated then
         print("\nUpdater updated! Restarting...")
-        displayMonitorStatus("Restarting...", {{text = "Updater was updated", color = colors.yellow}})
         sleep(2)
         os.reboot()
         return
@@ -492,26 +658,20 @@ local function main()
         sleep(0.5)
     end
     
-    -- Check if main payload exists
-    local mainScript = FILES[2].local_name  -- train_station.lua
-    if not fs.exists(mainScript) then
+    -- Check if main script exists
+    if not fs.exists(selectedScript.local_name) then
         playSound("error")
         term.clear()
         term.setCursorPos(1, 1)
         if term.isColor() then term.setTextColor(colors.red) end
-        print("ERROR: Main script not found!")
-        print("Failed to download " .. mainScript)
-        print("")
-        print("GitHub URL:")
-        print(getGitHubURL(FILES[2].github))
+        print("ERROR: Script not found!")
+        print("Failed to download " .. selectedScript.local_name)
         term.setTextColor(colors.white)
         print("\nRetrying in 10 seconds...")
         
         displayMonitorStatus("Error!", {
             {text = "Script not found", color = colors.red},
-            {text = mainScript, color = colors.orange},
-            {text = "", color = colors.white},
-            {text = "Retrying in 10s...", color = colors.yellow}
+            {text = selectedScript.local_name, color = colors.orange}
         })
         
         sleep(10)
@@ -525,7 +685,7 @@ local function main()
     
     -- Update monitor to show we're starting
     displayMonitorStatus("Starting...", {
-        {text = "Loading " .. mainScript, color = colors.green}
+        {text = selectedScript.name, color = colors.green}
     })
     
     -- Play success sound before launching
@@ -535,7 +695,7 @@ local function main()
     
     -- Run with error handling
     local ok, err = pcall(function()
-        shell.run(mainScript)
+        shell.run(selectedScript.local_name)
     end)
     
     if not ok then
@@ -544,15 +704,14 @@ local function main()
         term.clear()
         term.setCursorPos(1, 1)
         if term.isColor() then term.setTextColor(colors.red) end
-        print("ERROR: Main script crashed!")
+        print("ERROR: Script crashed!")
         term.setTextColor(colors.white)
         print(err)
         print("\nRebooting in 10 seconds...")
         
         displayMonitorStatus("Crashed!", {
             {text = "Script error", color = colors.red},
-            {text = "", color = colors.white},
-            {text = "Rebooting in 10s...", color = colors.yellow}
+            {text = selectedScript.name, color = colors.orange}
         })
         
         sleep(10)
@@ -572,9 +731,7 @@ if not ok then
     
     if useMonitor then
         displayMonitorStatus("CRITICAL ERROR", {
-            {text = "Updater crashed!", color = colors.red},
-            {text = "", color = colors.white},
-            {text = "Check terminal", color = colors.orange}
+            {text = "Updater crashed!", color = colors.red}
         })
     end
     
