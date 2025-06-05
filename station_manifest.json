@@ -98,7 +98,7 @@
           "next_station": "phystech",
           "platform_name": "P West",
           "display_order": 4,
-          "monitor": null
+          "monitor": "monitor_6"
         },
         "8:right": {
           "line": "P",
