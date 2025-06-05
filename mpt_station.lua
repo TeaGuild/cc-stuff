@@ -1,5 +1,6 @@
 -- Multi-Platform Train Station Controller with Graphics
 -- Supports multiple station peripherals on one computer with visual display
+-- Version 2.0 - Uses improved manifest format with platform-based organization
 
 -- Configuration
 local SERVER_URL = "https://ryusei.bun-procyon.ts.net"
@@ -15,7 +16,7 @@ local COMPUTER_ID = os.getComputerID()
 
 -- Find all station peripherals
 local stations = {}
-local STATION_PERIPHERALS = {}
+local STATION_IDS = {}  -- Format: "computerID:peripheralName"
 
 -- More robust station detection
 local peripherals = peripheral.getNames()
@@ -30,14 +31,15 @@ for _, name in ipairs(peripherals) do
     ) then
         local test = peripheral.wrap(name)
         if test and pcall(test.getStationName) then
-            stations[name] = test
-            table.insert(STATION_PERIPHERALS, name)
-            print("Found station: " .. name .. " (" .. pType .. ")")
+            local stationId = COMPUTER_ID .. ":" .. name
+            stations[stationId] = test
+            table.insert(STATION_IDS, stationId)
+            print("Found station: " .. stationId)
         end
     end
 end
 
-if #STATION_PERIPHERALS == 0 then
+if #STATION_IDS == 0 then
     error("No Create train stations found!")
 end
 
@@ -55,17 +57,27 @@ end
 
 -- Global state
 local manifest = nil
-local stationData = {}  -- Keyed by peripheral name
+local stationData = {}  -- Keyed by station ID
+local platformInfo = {}  -- Manifest data per station ID
 local lastManifestUpdate = 0
 local soundEnabled = true
-local lastSoundTime = {}  -- Per station
+local lastSoundTime = {}  -- Per station ID
+local showLatinNames = true  -- Toggle for name display
 
 -- Colors for lines (ComputerCraft colors)
 local LINE_COLORS = {
-    K = colors.brown,
+    K = colors.green,
     P = colors.orange,
     CM = colors.red,
     default = colors.gray
+}
+
+-- Direction symbols
+local DIRECTION_SYMBOLS = {
+    north = "↑",
+    south = "↓",
+    east = "→",
+    west = "←"
 }
 
 -- Helper functions
@@ -96,12 +108,12 @@ local function playTone(frequency, duration, volume)
     speaker.playAudio(buffer)
 end
 
-local function playStationSound(soundType, stationName)
+local function playStationSound(soundType, stationId)
     if not useSpeaker or not soundEnabled then return end
     
     -- Check cooldown per station
     local currentTime = os.clock()
-    if lastSoundTime[stationName] and (currentTime - lastSoundTime[stationName] < 10) then
+    if lastSoundTime[stationId] and (currentTime - lastSoundTime[stationId] < 10) then
         return
     end
     
@@ -126,7 +138,7 @@ local function playStationSound(soundType, stationName)
         end
     end
     
-    lastSoundTime[stationName] = currentTime
+    lastSoundTime[stationId] = currentTime
 end
 
 -- Download manifest from GitHub
@@ -152,59 +164,40 @@ local function downloadManifest()
     return manifest, nil
 end
 
--- Find station info in manifest
-local function findStationInManifest(computerID, peripheralName)
-    if not manifest then return nil end
+-- Process manifest to create platform lookup
+local function processManifest(manifest)
+    platformInfo = {}
     
-    for lineId, line in pairs(manifest.lines) do
-        for _, station in ipairs(line.stations) do
-            -- Check simple station
-            if type(station.computer_id) == "number" then
-                if station.computer_id == computerID and station.peripheral == peripheralName then
-                    return {
-                        station = station,
-                        line = lineId,
-                        line_info = line
-                    }
-                end
-            -- Check multi-computer station
-            elseif type(station.computer_id) == "table" then
-                for _, cid in ipairs(station.computer_id) do
-                    if cid == computerID and station.peripheral == peripheralName then
-                        return {
-                            station = station,
-                            line = lineId,
-                            line_info = line
-                        }
-                    end
-                end
-            end
+    for stationName, station in pairs(manifest.stations) do
+        for platformId, platform in pairs(station.platforms) do
+            platformInfo[platformId] = {
+                station_name = station.name,
+                station_name_latin = station.name_latin,
+                station_name_en = station.name_en,
+                line = platform.line,
+                direction = platform.direction,
+                next_station = platform.next_station,
+                platform_name = platform.platform_name,
+                is_transfer = station.transfer,
+                connections = {}
+            }
             
-            -- Check platforms
-            if station.platforms then
-                for platformName, platform in pairs(station.platforms) do
-                    if platform.computer_id == computerID and platform.peripheral == peripheralName then
-                        return {
-                            station = station,
-                            line = lineId,
-                            line_info = line,
-                            platform = platformName
-                        }
-                    end
+            -- Build connections list
+            for _, line in ipairs(station.lines) do
+                if line ~= platform.line then
+                    table.insert(platformInfo[platformId].connections, line)
                 end
             end
         end
     end
-    
-    return nil
 end
 
 -- Gather data from a station peripheral
-local function getStationData(station, peripheralName)
+local function getStationData(station, stationId)
     local data = {
-        station_id = COMPUTER_ID .. ":" .. peripheralName,
+        station_id = stationId,
         computer_id = COMPUTER_ID,
-        peripheral_name = peripheralName,
+        peripheral_name = stationId:match(":(.+)"),
         assembly_mode = safeCall(station.isInAssemblyMode) or false,
         train_present = safeCall(station.isTrainPresent) or false,
         train_imminent = safeCall(station.isTrainImminent) or false,
@@ -217,13 +210,16 @@ local function getStationData(station, peripheralName)
         data.has_schedule = safeCall(station.hasSchedule) or false
     end
     
-    -- Add manifest info
-    local manifestInfo = findStationInManifest(COMPUTER_ID, peripheralName)
-    if manifestInfo then
-        data.line = manifestInfo.line
-        data.line_info = manifestInfo.line_info
-        data.manifest_station = manifestInfo.station
-        data.platform = manifestInfo.platform
+    -- Add platform info from manifest
+    if platformInfo[stationId] then
+        local pInfo = platformInfo[stationId]
+        data.line = pInfo.line
+        data.manifest_name = showLatinNames and pInfo.station_name_latin or pInfo.station_name_en
+        data.direction = pInfo.direction
+        data.next_station = pInfo.next_station
+        data.platform_name = pInfo.platform_name
+        data.is_transfer = pInfo.is_transfer
+        data.connections = pInfo.connections
     end
     
     return data
@@ -286,20 +282,18 @@ local function drawStationDisplay(startX, startY, width, height, data)
     drawBox(startX, startY, width, 3, lineColor)
     
     -- Station name
-    local stationName = data.manifest_station and data.manifest_station.name or data.station_name
-    local displayName = stationName
-    if #displayName > width - 2 then
-        displayName = string.sub(displayName, 1, width - 5) .. "..."
+    local stationName = data.manifest_name or data.station_name
+    if #stationName > width - 2 then
+        stationName = string.sub(stationName, 1, width - 5) .. "..."
     end
+    drawText(startX + 1, startY + 1, stationName, colors.white, lineColor)
     
-    drawText(startX + 1, startY + 1, displayName, colors.white, lineColor)
-    
-    -- Line and platform info
-    local lineInfo = data.line or "?"
-    if data.platform then
-        lineInfo = lineInfo .. " (" .. data.platform .. ")"
+    -- Platform and direction info
+    local platformText = data.platform_name or "Platform"
+    if data.direction then
+        platformText = platformText .. " " .. (DIRECTION_SYMBOLS[data.direction] or data.direction)
     end
-    drawText(startX + 1, startY + 2, lineInfo, colors.white, lineColor)
+    drawText(startX + 1, startY + 2, platformText, colors.white, lineColor)
     
     -- Status area
     local statusY = startY + 4
@@ -330,18 +324,37 @@ local function drawStationDisplay(startX, startY, width, height, data)
         drawText(startX + 2, statusY + 2, trainInfo, colors.black, statusColor)
     end
     
+    -- Next station info
+    if data.next_station and manifest and manifest.stations[data.next_station] then
+        local nextY = statusY + 4
+        drawText(startX + 1, nextY, "Next:", colors.gray, colors.black)
+        local nextName = showLatinNames and 
+            manifest.stations[data.next_station].name_latin or 
+            manifest.stations[data.next_station].name_en
+        if #nextName > width - 7 then
+            nextName = string.sub(nextName, 1, width - 10) .. "..."
+        end
+        drawText(startX + 7, nextY, nextName, colors.lightGray, colors.black)
+    end
+    
     -- Visual train indicator
-    if height > 12 then
-        local trackY = startY + 9
+    if height > 15 then
+        local trackY = startY + height - 5
         
         -- Draw track
         drawBox(startX + 2, trackY, width - 4, 1, colors.gray)
+        
+        -- Draw direction indicator
+        if data.direction then
+            local dirSymbol = DIRECTION_SYMBOLS[data.direction] or "?"
+            drawText(startX + width - 3, trackY, dirSymbol, colors.yellow, colors.gray)
+        end
         
         -- Draw train if present
         if data.train_present then
             local trainX = startX + math.floor(width / 2) - 2
             drawBox(trainX, trackY - 1, 5, 3, colors.cyan)
-            drawText(trainX + 1, trackY, "███", colors.black, colors.cyan)
+            drawText(trainX + 1, trackY, "===", colors.black, colors.cyan)
         elseif data.train_imminent then
             -- Animate approaching train
             local offset = math.floor((os.clock() * 10) % 5)
@@ -351,10 +364,10 @@ local function drawStationDisplay(startX, startY, width, height, data)
         end
     end
     
-    -- Connection info
-    if data.manifest_station and data.manifest_station.connections and #data.manifest_station.connections > 0 then
+    -- Connection info (for transfer stations)
+    if data.is_transfer and data.connections and #data.connections > 0 then
         local connY = startY + height - 2
-        local connections = "↔ " .. table.concat(data.manifest_station.connections, ", ")
+        local connections = "Transfer: " .. table.concat(data.connections, ", ")
         if #connections > width - 2 then
             connections = string.sub(connections, 1, width - 5) .. "..."
         end
@@ -370,7 +383,7 @@ local function updateDisplay()
     local monWidth, monHeight = monitor.getSize()
     
     -- Calculate layout
-    local numStations = #STATION_PERIPHERALS
+    local numStations = #STATION_IDS
     local stationsPerRow = math.min(numStations, 2)  -- Max 2 stations per row
     local rows = math.ceil(numStations / stationsPerRow)
     
@@ -383,8 +396,8 @@ local function updateDisplay()
         for col = 1, stationsPerRow do
             stationIndex = stationIndex + 1
             if stationIndex <= numStations then
-                local peripheralName = STATION_PERIPHERALS[stationIndex]
-                local data = stationData[peripheralName]
+                local stationId = STATION_IDS[stationIndex]
+                local data = stationData[stationId]
                 
                 if data then
                     local x = (col - 1) * stationWidth + 1
@@ -398,7 +411,8 @@ local function updateDisplay()
     
     -- Footer
     drawText(1, monHeight, os.date("%H:%M:%S"), colors.gray, colors.black)
-    drawText(monWidth - 10, monHeight, "C" .. COMPUTER_ID, colors.gray, colors.black)
+    local nameMode = showLatinNames and "Latin" or "English"
+    drawText(monWidth - 15, monHeight, nameMode .. " C" .. COMPUTER_ID, colors.gray, colors.black)
 end
 
 -- Terminal display
@@ -410,21 +424,23 @@ local function displayTerminal()
     print("=== MULTI-PLATFORM STATION CONTROLLER ===")
     term.setTextColor(colors.white)
     print("Computer ID: " .. COMPUTER_ID)
-    print("Stations: " .. #STATION_PERIPHERALS)
+    print("Stations: " .. #STATION_IDS)
+    print("Name Mode: " .. (showLatinNames and "Latin" or "English"))
     print("")
     
     -- Show each station status
-    for i, peripheralName in ipairs(STATION_PERIPHERALS) do
-        local data = stationData[peripheralName]
+    for i, stationId in ipairs(STATION_IDS) do
+        local data = stationData[stationId]
         if data then
             if term.isColor() then 
                 term.setTextColor(LINE_COLORS[data.line] or colors.white)
             end
-            print("Station " .. i .. ": " .. peripheralName)
+            print("Platform " .. i .. ": " .. stationId)
             
             term.setTextColor(colors.white)
-            print("  Name: " .. (data.manifest_station and data.manifest_station.name or data.station_name))
-            print("  Line: " .. (data.line or "Unknown"))
+            print("  Name: " .. (data.manifest_name or data.station_name))
+            print("  Line: " .. (data.line or "Unknown") .. 
+                  " " .. (DIRECTION_SYMBOLS[data.direction] or ""))
             
             local status = "Idle"
             if data.train_present then
@@ -435,19 +451,27 @@ local function displayTerminal()
                 status = "Train enroute"
             end
             print("  Status: " .. status)
+            
+            if data.next_station then
+                print("  Next: " .. data.next_station)
+            end
             print("")
         end
     end
     
     -- Controls
     if term.isColor() then term.setTextColor(colors.gray) end
-    print("Q: Quit | S: Toggle Sound | M: Update Manifest")
+    print("Q: Quit | S: Toggle Sound | N: Toggle Names")
+    print("M: Update Manifest | R: Refresh")
     term.setTextColor(colors.white)
 end
 
--- Main loop
+-- Main program
 print("Starting Multi-Platform Station Controller...")
-print("Found " .. #STATION_PERIPHERALS .. " stations")
+print("Found " .. #STATION_IDS .. " stations:")
+for _, id in ipairs(STATION_IDS) do
+    print("  " .. id)
+end
 
 -- Play startup sound
 if useSpeaker then
@@ -457,12 +481,15 @@ if useSpeaker then
 end
 
 -- Initial manifest download
-print("Downloading station manifest...")
+print("\nDownloading station manifest...")
 local err
 manifest, err = downloadManifest()
 if not manifest then
     print("Warning: " .. err)
     print("Continuing without manifest data...")
+else
+    processManifest(manifest)
+    print("Manifest loaded successfully")
 end
 
 sleep(2)
@@ -480,31 +507,32 @@ while true do
             local newManifest, _ = downloadManifest()
             if newManifest then
                 manifest = newManifest
+                processManifest(manifest)
                 lastManifestUpdate = os.clock()
             end
         end
         
         -- Update all stations
-        for _, peripheralName in ipairs(STATION_PERIPHERALS) do
-            local station = stations[peripheralName]
-            local data = getStationData(station, peripheralName)
+        for _, stationId in ipairs(STATION_IDS) do
+            local station = stations[stationId]
+            local data = getStationData(station, stationId)
             
             -- Send update to server
             sendUpdate(data)
             
             -- Check for changes and play sounds
-            local lastStationData = lastData[peripheralName] or {}
+            local lastStationData = lastData[stationId] or {}
             
             if not lastStationData.train_present and data.train_present then
-                playStationSound("arrival", peripheralName)
+                playStationSound("arrival", stationId)
             elseif lastStationData.train_present and not data.train_present then
-                playStationSound("departure", peripheralName)
+                playStationSound("departure", stationId)
             elseif not lastStationData.train_imminent and data.train_imminent then
-                playStationSound("imminent", peripheralName)
+                playStationSound("imminent", stationId)
             end
             
-            stationData[peripheralName] = data
-            lastData[peripheralName] = data
+            stationData[stationId] = data
+            lastData[stationId] = data
         end
         
         -- Update displays
@@ -523,17 +551,29 @@ while true do
         elseif param == keys.s then
             soundEnabled = not soundEnabled
             print("Sound " .. (soundEnabled and "enabled" or "disabled"))
+            sleep(1)
+            
+        elseif param == keys.n then
+            showLatinNames = not showLatinNames
+            print("Switched to " .. (showLatinNames and "Latin" or "English") .. " names")
+            sleep(1)
             
         elseif param == keys.m then
             print("Updating manifest...")
             manifest, err = downloadManifest()
             if manifest then
+                processManifest(manifest)
                 print("Manifest updated!")
                 lastManifestUpdate = os.clock()
             else
                 print("Failed: " .. err)
             end
             sleep(2)
+            
+        elseif param == keys.r then
+            print("Refreshing...")
+            os.cancelTimer(updateTimer)
+            updateTimer = os.startTimer(0.1)
         end
     end
 end
