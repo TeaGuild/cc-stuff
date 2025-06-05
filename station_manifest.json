@@ -121,7 +121,7 @@
           "next_station": "local_minimum",
           "platform_name": "CM Terminal",
           "display_order": 6,
-          "monitor": null
+          "monitor": "left"
         }
       },
       "transfer": true
