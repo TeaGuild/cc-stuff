@@ -134,16 +134,16 @@
           "direction": "north",
           "next_station": "old_vanyuki",
           "platform_name": "Platform 2",
-          "display_order": 1,
-          "monitor": null
+          "display_order": 2,
+          "monitor": "monitor_5"
         },
         "2:left": {
           "line": "P",
           "direction": "south",
           "next_station": null,
           "platform_name": "Platform 1",
-          "display_order": 2,
-          "monitor": null
+          "display_order": 1,
+          "monitor": "monitor_4"
         }
       },
       "transfer": false
