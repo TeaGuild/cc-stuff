@@ -115,7 +115,7 @@
         "16:left": {
           "line": "CM",
           "direction": "north",
-          "next_station": null,
+          "next_station": "local_minimum",
           "platform_name": "CM Terminal",
           "display_order": 6,
           "monitor": null
@@ -218,6 +218,23 @@
           "next_station": null,
           "platform_name": "South Terminal",
           "display_order": 2,
+          "monitor": null
+        }
+      },
+      "transfer": false
+    },
+    "local_minimum": {
+      "name": "Локальный Минимум",
+      "name_latin": "Lokalnyi Minimum",
+      "name_en": "Local Minimum",
+      "lines": ["CM"],
+      "platforms": {
+        "17:Create_Station_1": {
+          "line": "CM",
+          "direction": "north",
+          "next_station": "local_minimum",
+          "platform_name": "CM Terminal",
+          "display_order": 0,
           "monitor": null
         }
       },
