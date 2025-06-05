@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "last_updated": "2025-06-05T12:00:00Z",
+  "network": {
+    "name": "Metro Network",
+    "timezone": "Europe/Moscow"
+  },
+  "lines": {
+    "K": {
+      "name": "Наземная",
+      "name_en": "Ground Line",
+      "color": "green",
+      "type": "",
+      "trains": ["K01", "K02"],
+      "stations": [
+        {
+          "id": "spawn",
+          "name": "Спавн",
+          "name_en": "Spawn",
+          "computer_id": 11,
+          "peripheral": "top",
+          "platforms": null,
+          "connections": []
+        },
+        {
+          "id": "old_vanyuki_k",
+          "name": "Старые Ванюки",
+          "name_en": "Old Vanyuki",
+          "computer_id": [9, 10],
+          "peripheral": "bottom",
+          "platforms": {
+            "inbound": { "computer_id": 9, "peripheral": "bottom" },
+            "outbound": { "computer_id": 10, "peripheral": "bottom" }
+          },
+          "connections": ["P", "CM"]
+        },
+        {
+          "id": "shore",
+          "name": "Берег",
+          "name_en": "Shore",
+          "computer_id": 18,
+          "peripheral": "left",
+          "platforms": null,
+          "connections": []
+        },
+        {
+          "id": "lake",
+          "name": "Озерная",
+          "name_en": "Lake",
+          "computer_id": 20,
+          "peripheral": "left",
+          "platforms": null,
+          "connections": []
+        }
+      ]
+    },
+    "P": {
+      "name": "Подземная",
+      "name_en": "Underground Line",
+      "color": "orange",
+      "type": "linear",
+      "trains": ["P04", "P05"],
+      "stations": [
+        {
+          "id": "phystech",
+          "name": "Физтех",
+          "name_en": "Phystech",
+          "computer_id": 2,
+          "peripheral": "left",
+          "platforms": null,
+          "connections": []
+        },
+        {
+          "id": "old_vanyuki_p",
+          "name": "Старые Ванюки",
+          "name_en": "Old Vanyuki",
+          "computer_id": 8,
+          "peripheral": "left",
+          "platforms": null,
+          "connections": ["K", "CM"]
+        },
+        {
+          "id": "astropolis_e",
+          "name": "Astropolis - E",
+          "name_en": "Astropolis - E",
+          "computer_id": 7,
+          "peripheral": "Create_Station_0",
+          "platforms": null,
+          "connections": []
+        }
+      ]
+    },
+    "CM": {
+      "name": "Скоростной Монорельс",
+      "name_en": "Swift Monorail",
+      "color": "red",
+      "type": "linear",
+      "trains": ["CM1"],
+      "stations": [
+        {
+          "id": "old_vanyuki_cm",
+          "name": "Старые Ванюки",
+          "name_en": "Old Vanyuki",
+          "computer_id": 16,
+          "peripheral": "left",
+          "platforms": null,
+          "connections": ["K", "P"]
+        }
+      ]
+    }
+  },
+  "station_groups": {
+    "old_vanyuki": {
+      "name": "Старые Ванюки",
+      "name_en": "Old Vanyuki",
+      "stations": ["old_vanyuki_k", "old_vanyuki_p", "old_vanyuki_cm"],
+      "transfer_station": true
+    }
+  },
+  "colors": {
+    "K": {
+      "primary": "colors.green",
+      "secondary": "colors.orange",
+      "text": "colors.white"
+    },
+    "P": {
+      "primary": "colors.orange", 
+      "secondary": "colors.yellow",
+      "text": "colors.black"
+    },
+    "CM": {
+      "primary": "colors.red",
+      "secondary": "colors.pink", 
+      "text": "colors.white"
+    }
+  },
+  "display": {
+    "update_interval": 2,
+    "sound_enabled": true,
+    "animation_speed": 0.1,
+    "show_english": true,
+    "time_format": "24h"
+  }
+}
