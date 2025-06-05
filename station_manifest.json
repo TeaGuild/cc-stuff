@@ -5,6 +5,27 @@
     "name": "Metro Network",
     "timezone": "Europe/Moscow"
   },
+  "computer_configs": {
+    "11": {
+      "central_monitor": "monitor_0",
+      "layout_columns": 2
+    },
+    "9": {
+      "central_monitor": null
+    },
+    "18": {
+      "central_monitor": "top",
+      "layout_columns": 1
+    },
+    "20": {
+      "central_monitor": "monitor_0",
+      "layout_columns": "auto"
+    },
+    "default": {
+      "central_monitor": "monitor_0",
+      "layout_columns": "auto"
+    }
+  },
   "lines": {
     "K": {
       "name": "Наземная",
@@ -42,7 +63,9 @@
           "line": "K",
           "direction": "south",
           "next_station": "old_vanyuki",
-          "platform_name": "Platform 1"
+          "platform_name": "Platform 1",
+          "display_order": 1,
+          "monitor": null
         }
       },
       "transfer": false
@@ -57,31 +80,41 @@
           "line": "K",
           "direction": "north",
           "next_station": "spawn",
-          "platform_name": "K North"
+          "platform_name": "K North",
+          "display_order": 2,
+          "monitor": "monitor_1"
         },
         "10:bottom": {
           "line": "K",
           "direction": "south",
           "next_station": "shore",
-          "platform_name": "K South"
+          "platform_name": "K South",
+          "display_order": 3,
+          "monitor": "monitor_2"
         },
         "8:left": {
           "line": "P",
           "direction": "west",
           "next_station": "phystech",
-          "platform_name": "P West"
+          "platform_name": "P West",
+          "display_order": 4,
+          "monitor": null
         },
         "8:right": {
           "line": "P",
           "direction": "east",
           "next_station": "astropolis_e",
-          "platform_name": "P East"
+          "platform_name": "P East",
+          "display_order": 5,
+          "monitor": null
         },
         "16:left": {
           "line": "CM",
           "direction": "north",
           "next_station": null,
-          "platform_name": "CM Terminal"
+          "platform_name": "CM Terminal",
+          "display_order": 6,
+          "monitor": null
         }
       },
       "transfer": true
@@ -96,13 +129,17 @@
           "line": "P",
           "direction": "north",
           "next_station": "old_vanyuki",
-          "platform_name": "Platform 2"
+          "platform_name": "Platform 2",
+          "display_order": 1,
+          "monitor": null
         },
         "2:left": {
           "line": "P",
           "direction": "south",
           "next_station": null,
-          "platform_name": "Platform 1"
+          "platform_name": "Platform 1",
+          "display_order": 2,
+          "monitor": null
         }
       },
       "transfer": false
@@ -117,13 +154,17 @@
           "line": "P",
           "direction": "west",
           "next_station": "old_vanyuki",
-          "platform_name": "West Platform"
+          "platform_name": "West Platform",
+          "display_order": 1,
+          "monitor": "monitor_3"
         },
         "7:Create_Station_1": {
           "line": "P",
           "direction": "east",
           "next_station": null,
-          "platform_name": "East Terminal"
+          "platform_name": "East Terminal",
+          "display_order": 2,
+          "monitor": null
         }
       },
       "transfer": false
@@ -138,13 +179,17 @@
           "line": "K",
           "direction": "north",
           "next_station": "old_vanyuki",
-          "platform_name": "North Platform"
+          "platform_name": "North Platform",
+          "display_order": 1,
+          "monitor": null
         },
         "18:right": {
           "line": "K",
           "direction": "south",
           "next_station": "lake",
-          "platform_name": "South Platform"
+          "platform_name": "South Platform",
+          "display_order": 2,
+          "monitor": null
         }
       },
       "transfer": false
@@ -159,13 +204,17 @@
           "line": "K",
           "direction": "north",
           "next_station": "shore",
-          "platform_name": "North Platform"
+          "platform_name": "North Platform",
+          "display_order": 1,
+          "monitor": null
         },
         "20:right": {
           "line": "K",
           "direction": "south",
           "next_station": null,
-          "platform_name": "South Terminal"
+          "platform_name": "South Terminal",
+          "display_order": 2,
+          "monitor": null
         }
       },
       "transfer": false
