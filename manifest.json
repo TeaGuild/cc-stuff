@@ -51,5 +51,5 @@
       ]
     }
   ],
-  "default": "train_station"
+  "default": "mpt_train_station"
 }
