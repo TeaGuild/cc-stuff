@@ -310,24 +310,71 @@ local function saveConfig(config)
     file.close()
 end
 
--- Download and parse manifest
-local function downloadManifest()
-    local url = getGitHubURL(MANIFEST_URL)
-    local response = http.get(url)
+-- Load cached manifest
+local function loadCachedManifest()
+    local MANIFEST_CACHE = ".manifest_cache"
+    if not fs.exists(MANIFEST_CACHE) then
+        return nil
+    end
     
+    local file = fs.open(MANIFEST_CACHE, "r")
+    local content = file.readAll()
+    file.close()
+    
+    return textutils.unserialiseJSON(content)
+end
+
+-- Save manifest to cache
+local function saveManifestCache(manifest)
+    local MANIFEST_CACHE = ".manifest_cache"
+    local file = fs.open(MANIFEST_CACHE, "w")
+    file.write(textutils.serialiseJSON(manifest))
+    file.close()
+end
+
+-- Download and parse manifest
+local function downloadManifest(checkOnly)
+    local url = getGitHubURL(MANIFEST_URL)
+    
+    -- Download manifest
+    local response = http.get(url)
     if not response then
-        return nil, "Failed to download manifest"
+        return nil, "Failed to download manifest", false
     end
     
     local content = response.readAll()
     response.close()
     
+    -- Parse manifest
     local manifest = textutils.unserialiseJSON(content)
     if not manifest or not manifest.scripts then
-        return nil, "Invalid manifest format"
+        return nil, "Invalid manifest format", false
     end
     
-    return manifest, nil
+    -- Check if manifest has changed
+    local cachedManifest = loadCachedManifest()
+    local manifestChanged = false
+    
+    if cachedManifest then
+        -- Compare manifest hashes
+        local oldHash = getFileHash(textutils.serialiseJSON(cachedManifest))
+        local newHash = getFileHash(textutils.serialiseJSON(manifest))
+        manifestChanged = (oldHash ~= newHash)
+        
+        if manifestChanged and not checkOnly then
+            print("Manifest updated - new scripts may be available!")
+            sleep(2)
+        end
+    else
+        manifestChanged = true
+    end
+    
+    -- Save manifest if not in check-only mode
+    if not checkOnly and manifestChanged then
+        saveManifestCache(manifest)
+    end
+    
+    return manifest, nil, manifestChanged
 end
 
 -- Script selection menu
@@ -527,6 +574,15 @@ local function quickUpdateCheck(selectedScript, checkOnly)
         }
     }
     
+    -- Add manifest to check list (but not in check-only mode from other scripts)
+    if not checkOnly then
+        table.insert(filesToCheck, {
+            github = "manifest.json",
+            local_name = ".manifest_cache",
+            description = "Manifest"
+        })
+    end
+    
     -- Check each file
     for i, fileInfo in ipairs(filesToCheck) do
         if not checkOnly then
@@ -625,21 +681,87 @@ local function main(...)
     if not checkOnly then
         print("\nDownloading manifest...")
     end
-    local manifest, err = downloadManifest()
+    local manifest, err, manifestChanged = downloadManifest(checkOnly)
     if not manifest then
         if not checkOnly then
             playSound("error")
             print("Failed to download manifest: " .. err)
-            sleep(5)
-            os.reboot()
+            
+            -- Try to use cached manifest
+            manifest = loadCachedManifest()
+            if manifest then
+                print("Using cached manifest...")
+                sleep(1)
+            else
+                sleep(5)
+                os.reboot()
+                return false
+            end
+        else
+            return false
         end
-        return false
+    end
+    
+    -- Check if we should prompt for new selection due to manifest changes
+    local forceSelection = false
+    if manifestChanged and config.selected_script then
+        -- Check if our selected script still exists
+        local scriptExists = false
+        for _, script in ipairs(manifest.scripts) do
+            if script.id == config.selected_script then
+                scriptExists = true
+                break
+            end
+        end
+        
+        if not scriptExists then
+            print("Selected script no longer exists!")
+            forceSelection = true
+        elseif not checkOnly then
+            -- Count new scripts
+            local cachedManifest = loadCachedManifest()
+            local newScripts = 0
+            if cachedManifest then
+                for _, script in ipairs(manifest.scripts) do
+                    local found = false
+                    for _, oldScript in ipairs(cachedManifest.scripts) do
+                        if script.id == oldScript.id then
+                            found = true
+                            break
+                        end
+                    end
+                    if not found then
+                        newScripts = newScripts + 1
+                    end
+                end
+            end
+            
+            if newScripts > 0 then
+                print("")
+                if term.isColor() then term.setTextColor(colors.lime) end
+                print(newScripts .. " new script(s) available!")
+                print("Press S to view new options...")
+                term.setTextColor(colors.white)
+                
+                -- Give extra time to press S
+                local timer = os.startTimer(3)
+                while true do
+                    local event, param = os.pullEvent()
+                    if event == "timer" and param == timer then
+                        break
+                    elseif event == "key" and (param == keys.s or param == keys.S) then
+                        changeSelection = true
+                        break
+                    end
+                end
+            end
+        end
     end
     
     -- Select script if needed
     local selectedScript = nil
     
-    if not checkOnly and (changeSelection or not config.selected_script) then
+    if not checkOnly and (changeSelection or forceSelection or not config.selected_script) then
         selectedScript = selectScript(manifest)
         config.selected_script = selectedScript.id
         saveConfig(config)
