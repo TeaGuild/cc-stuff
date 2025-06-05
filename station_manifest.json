@@ -115,7 +115,7 @@
           "display_order": 5,
           "monitor": "monitor_6"
         },
-        "16:left": {
+        "16:front": {
           "line": "CM",
           "direction": "north",
           "next_station": "local_minimum",
