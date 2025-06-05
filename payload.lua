@@ -12,4 +12,4 @@ monitor.write("Hello, World")
 
 monitor.setCursorPos(1,2)
 
-monitor.write("Second Line")
+monitor.write("Second Line 2")
