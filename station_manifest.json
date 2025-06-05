@@ -101,17 +101,17 @@
         },
         "8:Create_Station_3": {
           "line": "P",
-          "direction": "west",
+          "direction": "east",
           "next_station": "phystech",
-          "platform_name": "P West",
+          "platform_name": "P East",
           "display_order": 4,
           "monitor": "monitor_8"
         },
         "8:left": {
           "line": "P",
-          "direction": "east",
+          "direction": "west",
           "next_station": "astropolis_e",
-          "platform_name": "P East",
+          "platform_name": "P West",
           "display_order": 5,
           "monitor": "monitor_6"
         },
