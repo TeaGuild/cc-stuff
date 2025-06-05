@@ -8,7 +8,7 @@ local UPDATE_INTERVAL = 2  -- seconds for station updates
 local PASSENGER_DISPLAY = true  -- Set to false for debug display
 
 -- GitHub update configuration
-local UPDATE_CHECK_INTERVAL = 3600  -- Check for updates every hour
+local UPDATE_CHECK_INTERVAL = 300  -- Check for updates every 5 minutes
 local STARTUP_SCRIPT = "startup.lua"  -- The updater script name
 
 -- Get computer ID for unique identification
@@ -76,7 +76,7 @@ local function safeCall(func, ...)
 end
 
 -- Simple debug logger
-local DEBUG = false  -- Set to true for debug output
+local DEBUG = true  -- Set to true for debug output
 local function debug(msg)
     if DEBUG then
         print("[DEBUG] " .. msg)
