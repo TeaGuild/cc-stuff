@@ -15,7 +15,7 @@
       ]
     },
     {
-      "id": "train_station",
+      "id": "mpt_train_station",
       "name": "Multiplatform Train Station Monitor",
       "description": "Monitor and display Create mod multiplatform train station status",
       "file": "mpt_station.lua",
