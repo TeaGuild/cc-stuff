@@ -8,7 +8,7 @@ local UPDATE_INTERVAL = 2  -- seconds for station updates
 local PASSENGER_DISPLAY = true  -- Set to false for debug display
 
 -- GitHub update configuration
-local UPDATE_CHECK_INTERVAL = 300  -- Check for updates every 5 minutes
+local UPDATE_CHECK_INTERVAL = 300
 local STARTUP_SCRIPT = "startup.lua"  -- The updater script name
 
 -- Get computer ID for unique identification
@@ -105,33 +105,86 @@ local function playTrainSound(soundType)
     if not useSpeaker then return end
     
     if soundType == "arrival" then
-        -- Two-tone arrival chime
-        playTone(659, 0.3, 0.4)  -- E5
-        sleep(0.1)
-        playTone(523, 0.3, 0.4)  -- C5
+        -- Pleasant arrival melody (Westminster Quarters inspired)
+        local notes = {
+            {659, 0.4},  -- E5
+            {523, 0.4},  -- C5
+            {587, 0.4},  -- D5
+            {392, 0.8},  -- G4
+            nil,         -- pause
+            {392, 0.4},  -- G4
+            {587, 0.4},  -- D5
+            {659, 0.4},  -- E5
+            {523, 0.8},  -- C5
+        }
         
-    elseif soundType == "departure" then
-        -- Three quick beeps
-        for i = 1, 3 do
-            playTone(440, 0.1, 0.3)  -- A4
-            sleep(0.1)
+        for i, note in ipairs(notes) do
+            if note then
+                playTone(note[1], note[2], 0.35)
+                sleep(note[2] + 0.05)
+            else
+                sleep(0.2)
+            end
         end
         
+    elseif soundType == "departure" then
+        -- Classic train departure whistle sequence
+        -- Two long blasts, one short, one long
+        playTone(440, 0.8, 0.4)  -- A4 long
+        sleep(0.2)
+        playTone(440, 0.8, 0.4)  -- A4 long
+        sleep(0.2)
+        playTone(440, 0.3, 0.4)  -- A4 short
+        sleep(0.1)
+        playTone(440, 1.0, 0.4)  -- A4 long
+        
     elseif soundType == "imminent" then
-        -- Warning tone
-        playTone(392, 0.2, 0.3)  -- G4
-        sleep(0.05)
-        playTone(392, 0.2, 0.3)  -- G4
+        -- Attention-getting warning melody
+        for i = 1, 3 do
+            playTone(523, 0.2, 0.3)  -- C5
+            playTone(659, 0.2, 0.3)  -- E5
+            sleep(0.1)
+        end
+        -- Final emphasis
+        playTone(784, 0.6, 0.4)  -- G5
         
     elseif soundType == "update_check" then
         -- Quiet update check beep
         playTone(800, 0.05, 0.1)
         
     elseif soundType == "update_found" then
-        -- Update notification
-        playTone(523, 0.1, 0.2)  -- C5
-        playTone(659, 0.1, 0.2)  -- E5
-        playTone(784, 0.1, 0.2)  -- G5
+        -- Cheerful update notification melody
+        local notes = {
+            {523, 0.2},  -- C5
+            {587, 0.2},  -- D5
+            {659, 0.2},  -- E5
+            {784, 0.2},  -- G5
+            {659, 0.2},  -- E5
+            {784, 0.4},  -- G5
+            {1047, 0.6}, -- C6
+        }
+        
+        for _, note in ipairs(notes) do
+            playTone(note[1], note[2], 0.25)
+            sleep(note[2])
+        end
+        
+    elseif soundType == "startup" then
+        -- Startup fanfare
+        local notes = {
+            {262, 0.15}, -- C4
+            {330, 0.15}, -- E4
+            {392, 0.15}, -- G4
+            {523, 0.15}, -- C5
+            {659, 0.15}, -- E5
+            {784, 0.15}, -- G5
+            {1047, 0.4}, -- C6
+        }
+        
+        for _, note in ipairs(notes) do
+            playTone(note[1], note[2], 0.3)
+            sleep(note[2] * 0.8)
+        end
     end
 end
 
@@ -185,7 +238,7 @@ local maxHistory = 10
 -- Sound settings
 local soundEnabled = true
 local lastSoundTime = 0
-local SOUND_COOLDOWN = 5  -- Minimum seconds between sounds
+local SOUND_COOLDOWN = 10  -- Minimum seconds between sounds (increased for longer jingles)
 
 -- Function to trigger update check
 local function triggerUpdateCheck()
@@ -545,9 +598,7 @@ output("GitHub Updates: Enabled", 1, 8, colors.green)
 
 -- Play startup sound
 if useSpeaker then
-    playTone(262, 0.1, 0.2)  -- C4
-    sleep(0.05)
-    playTone(392, 0.2, 0.2)  -- G4
+    playTrainSound("startup")
 end
 
 sleep(3)
@@ -648,7 +699,17 @@ while true do
             soundEnabled = not soundEnabled
             output("Sound " .. (soundEnabled and "enabled" or "disabled"), 1, 1, colors.yellow)
             if soundEnabled and useSpeaker then
-                playTone(440, 0.1, 0.2)  -- Test beep
+                -- Play a test melody when enabling sound
+                local testNotes = {
+                    {523, 0.1},  -- C5
+                    {659, 0.1},  -- E5
+                    {784, 0.1},  -- G5
+                    {1047, 0.2}, -- C6
+                }
+                for _, note in ipairs(testNotes) do
+                    playTone(note[1], note[2], 0.25)
+                    sleep(note[2])
+                end
             end
             sleep(1)
             
