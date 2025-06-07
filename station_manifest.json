@@ -26,7 +26,7 @@
       "layout_columns": "auto"
     },
     "2": {
-      "central_monitor": "monitor_0",
+      "central_monitor": null,
       "layout_columns": 2
    },
     "default": {
