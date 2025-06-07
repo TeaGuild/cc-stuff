@@ -138,7 +138,7 @@
           "next_station": "astropolis_e",
           "platform_name": "Platform N",
           "display_order": 2,
-          "monitor": "monitor_9"
+          "monitor": "monitor_10"
         },
         "2:Create_Station_5": {
           "line": "P",
@@ -146,7 +146,7 @@
           "next_station": "old_vanyuki",
           "platform_name": "Platform S",
           "display_order": 1,
-          "monitor": "monitor_10"
+          "monitor": "monitor_9"
         }
       },
       "transfer": false
