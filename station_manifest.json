@@ -132,21 +132,21 @@
       "name_en": "Phystech",
       "lines": ["P"],
       "platforms": {
-        "2:Create_Station_2": {
+        "2:Create_Station_4": {
           "line": "P",
           "direction": "north",
-          "next_station": "old_vanyuki",
-          "platform_name": "Platform 2",
+          "next_station": "astropolis_e",
+          "platform_name": "Platform N",
           "display_order": 2,
-          "monitor": "monitor_5"
+          "monitor": "monitor_9"
         },
-        "2:left": {
+        "2:Create_Station_5": {
           "line": "P",
           "direction": "south",
-          "next_station": null,
-          "platform_name": "Platform 1",
+          "next_station": "old_vanyuki",
+          "platform_name": "Platform S",
           "display_order": 1,
-          "monitor": "monitor_4"
+          "monitor": "monitor_10"
         }
       },
       "transfer": false
